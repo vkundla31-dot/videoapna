@@ -6734,16 +6734,14 @@ window.videoApnaSelectedSound = null;
             categoryStart +
             Math.max(videos.length, 20);
 
-          const total =
-            Number(data.total || 0);
-
-          if (
-            !videos.length ||
-            (
-              total > 0 &&
-              shortsCategoryStarts[selectedQuery] >= total
-            )
-          ) {
+          /*
+           * Odysee API का data.total केवल current page के
+           * playable results हो सकता है। उसे पूरी category का
+           * total मानकर Shorts pagination बंद नहीं करनी है।
+           *
+           * केवल सच में खाली page आने पर category समाप्त मानें।
+           */
+          if (!videos.length) {
             shortsCategoryFinished[selectedQuery] = true;
           }
 
