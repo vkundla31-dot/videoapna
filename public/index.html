@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#ffffff">
+  <title>VideoApna</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://unpkg.com/@peertube/embed-api/build/player.min.js"></script>
+</head>
+
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <img
+      src="/assets/video-apna-icon.jpg"
+      class="brand-logo"
+      alt="VideoApna"
+    >
+    <span>VideoApna</span>
+  </div>
+
+  <button id="profileBtn" class="icon-btn" aria-label="Profile">👤</button>
+</header>
+
+<div class="search-box">
+  <span>🔍</span>
+  <input id="searchInput" type="search" placeholder="वीडियो खोजें...">
+</div>
+
+<nav class="categories" id="categories">
+  <button class="category active" data-category="सभी">सभी</button>
+  <button class="category" data-category="मनोरंजन">मनोरंजन</button>
+  <button class="category" data-category="संगीत">संगीत</button>
+  <button class="category" data-category="शिक्षा">शिक्षा</button>
+  <button class="category" data-category="न्यूज़">न्यूज़</button>
+  <button class="category" data-category="खेल">खेल</button>
+</nav>
+
+
+<!-- =========================================
+     VIDEOAPNA OWNER REPORT PANEL
+========================================= -->
+
+<section id="ownerPanelSection" class="owner-panel-section hidden">
+
+  <div class="section-header">
+    <h2>🛡️ Owner Report Panel</h2>
+
+    <button
+      type="button"
+      id="ownerPanelBack"
+      class="owner-panel-back"
+    >
+      ← वापस
+    </button>
+  </div>
+
+  <!-- Owner Login -->
+  <div id="ownerLoginBox" class="owner-login-box">
+
+    <h3>🔐 Owner Login</h3>
+
+    <p>
+      Report moderation करने के लिए Owner Login करें।
+    </p>
+
+    <input
+      id="ownerEmailInput"
+      type="email"
+      autocomplete="username"
+      placeholder="Owner Email"
+    >
+
+    <input
+      id="ownerPasswordInput"
+      type="password"
+      autocomplete="current-password"
+      placeholder="Owner Password"
+    >
+
+    <button
+      type="button"
+      id="ownerLoginBtn"
+      class="owner-login-btn"
+    >
+      🔐 Owner Login
+    </button>
+
+    <p id="ownerLoginMessage"></p>
+
+  </div>
+
+
+  <!-- Owner Dashboard -->
+  <div id="ownerDashboardBox" class="owner-dashboard-box hidden">
+
+    <div class="owner-dashboard-top">
+
+      <div>
+        <strong>👤 Owner</strong>
+        <span id="ownerLoggedEmail"></span>
+      </div>
+
+      <button
+        type="button"
+        id="ownerLogoutBtn"
+        class="owner-logout-btn"
+      >
+        🚪 Logout
+      </button>
+
+    </div>
+
+
+    <div class="owner-report-summary">
+
+      <div class="owner-summary-card">
+        <strong id="ownerTotalReports">0</strong>
+        <span>कुल Reports</span>
+      </div>
+
+      <div class="owner-summary-card">
+        <strong id="ownerPendingReports">0</strong>
+        <span>Pending</span>
+      </div>
+
+      <div class="owner-summary-card">
+        <strong id="ownerResolvedReports">0</strong>
+        <span>Resolved</span>
+      </div>
+
+      <div class="owner-summary-card">
+        <strong id="ownerRejectedReports">0</strong>
+        <span>Rejected</span>
+      </div>
+
+    </div>
+
+
+    <div class="owner-report-toolbar">
+
+      <button
+        type="button"
+        id="ownerRefreshReportsBtn"
+      >
+        🔄 Reports Refresh
+      </button>
+
+      <select id="ownerReportFilter">
+        <option value="all">सभी Reports</option>
+        <option value="pending">Pending</option>
+        <option value="resolved">Resolved</option>
+        <option value="rejected">Rejected</option>
+      </select>
+
+    </div>
+
+
+    <p id="ownerReportsMessage">
+      Reports लोड हो रही हैं...
+    </p>
+
+
+    <div id="ownerReportsList" class="owner-reports-list"></div>
+
+  </div>
+
+</section>
+
+<main>
+  <section class="hero">
+    <div>
+      <span class="hero-label">🇮🇳 अपना वीडियो प्लेटफ़ॉर्म</span>
+      <h1>देखिए। खोजिए। शेयर कीजिए।</h1>
+      <p>VideoApna पर अपने पसंदीदा वीडियो देखें।</p>
+    </div>
+  </section>
+
+  <div class="section-title">
+    <h2>🔥 लोकप्रिय वीडियो</h2>
+    <span id="resultCount"></span>
+  </div>
+
+  <section id="videoList" class="video-grid"></section>
+
+  <div id="noResults" class="no-results hidden">
+    <div>🔍</div>
+    <h3>वीडियो नहीं मिला</h3>
+    <p>दूसरा नाम या category खोजें।</p>
+  </div>
+</main>
+
+
+<section id="liked" class="liked-section hidden">
+  <div class="section-header">
+    <h2>❤️ पसंद किए गए वीडियो</h2>
+    <button type="button" id="likedBack">← वापस</button>
+  </div>
+
+  <div id="likedVideoList" class="video-grid"></div>
+
+  <p id="likedEmpty">अभी कोई पसंद किया हुआ वीडियो नहीं है।</p>
+</section>
+
+
+<section id="profileSection" class="profile-section hidden">
+  <div class="section-header">
+    <h2>👤 मेरी प्रोफाइल</h2>
+    <button type="button" id="profileBack">← वापस</button>
+  </div>
+
+  <div class="profile-card">
+
+    <div class="profile-avatar" id="profileAvatar">
+      <span id="profileAvatarIcon">👤</span>
+      <img id="profilePhoto" alt="Profile Photo">
+    </div>
+
+    <label class="profile-photo-btn">
+      📷 फोटो बदलें
+      <input id="profilePhotoInput" type="file" accept="image/*" hidden>
+    </label>
+
+    <input
+      id="profileNameInput"
+      class="profile-edit-input"
+      type="text"
+      placeholder="अपना नाम लिखें"
+      value="VideoApna User">
+
+    <input
+      id="profileAddressInput"
+      class="profile-edit-input"
+      type="text"
+      placeholder="अपना Address लिखें">
+
+
+    <!-- VideoApna Public Account -->
+    <div id="publicAccountBox" class="public-account-box">
+
+      <h3>🔐 VideoApna Account</h3>
+
+      <p id="publicAccountStatus">
+        वीडियो देखने के लिए Login जरूरी नहीं है।
+        अपना वीडियो Upload करने के लिए Account बनाइए।
+      </p>
+
+      <div id="publicAccountLoggedOut">
+
+        <input
+          id="publicAccountName"
+          class="profile-edit-input"
+          type="text"
+          placeholder="अपना नाम">
+
+        <input
+          id="publicAccountEmail"
+          class="profile-edit-input"
+          type="email"
+          placeholder="Email">
+
+        <input
+          id="publicAccountPassword"
+          class="profile-edit-input"
+          type="password"
+          placeholder="Password (कम से कम 8 अक्षर)">
+
+        <button
+          type="button"
+          id="publicAccountRegisterBtn"
+          class="profile-save-btn"
+        >
+          🆕 Account बनाएं
+        </button>
+
+        <button
+          type="button"
+          id="publicAccountLoginBtn"
+          class="profile-save-btn"
+        >
+          🔑 Login करें
+        </button>
+
+        <button
+          type="button"
+          id="publicAccountForgotBtn"
+          class="profile-save-btn"
+        >
+          🔄 Password भूल गए?
+        </button>
+
+      </div>
+
+      <div id="publicAccountLoggedIn" class="hidden">
+
+        <p>
+          ✅ Login है:
+          <strong id="publicAccountEmailText"></strong>
+        </p>
+
+        <button
+          type="button"
+          id="publicAccountLogoutBtn"
+          class="profile-save-btn"
+        >
+          🚪 Logout
+        </button>
+
+      </div>
+
+      <p id="publicAccountMessage"></p>
+
+    </div>
+
+    
+    <button
+      type="button"
+      id="openOwnerPanelBtn"
+      class="owner-panel-open-btn"
+    >
+      🛡️ Owner Panel
+    </button>
+
+    <a
+      href="/privacy-policy.html"
+      class="privacy-policy-link"
+      target="_blank"
+      rel="noopener"
+    >
+      🔒 Privacy Policy
+    </a>
+
+<button type="button" id="saveProfileBtn" class="profile-save-btn">
+      💾 Profile Save करें
+    </button>
+
+    <p id="profileSaveMessage">मेरा VideoApna प्रोफाइल</p>
+
+    <div class="profile-stats">
+      <div>
+        <strong id="profileVideoCount">0</strong>
+        <span>वीडियो</span>
+      </div>
+
+      <div>
+        <strong id="profileViews">0</strong>
+        <span>Views</span>
+      </div>
+
+      <div>
+        <strong id="profileLikes">0</strong>
+        <span>Likes</span>
+      </div>
+    </div>
+  </div>
+
+  <h3>🎬 मेरे वीडियो</h3>
+  <div id="myVideoList" class="video-grid"></div>
+
+  <p id="myVideoEmpty">
+    अभी कोई वीडियो upload नहीं किया है।
+  </p>
+</section>
+
+<nav class="bottom-nav">
+  <button type="button" class="bottom-item active" id="bottomHome">
+    <span>🏠</span>
+    <small>होम</small>
+  </button>
+
+  <button type="button" class="bottom-item" id="bottomTrending">
+    <span>🔥</span>
+    <small>ट्रेंडिंग</small>
+  </button>
+
+  <button type="button" class="bottom-item" id="bottomShorts">
+    <span>🎬</span>
+    <small>Shorts</small>
+  </button>
+
+  <button type="button" class="bottom-item" id="bottomUpload">
+    <span>➕</span>
+    <small>अपलोड</small>
+  </button>
+
+  <button type="button" class="bottom-item" id="bottomLiked">
+    <span>❤️</span>
+    <small>पसंद</small>
+  </button>
+
+  <button type="button" class="bottom-item" id="bottomProfile">
+    <span>👤</span>
+    <small>प्रोफाइल</small>
+  </button>
+</nav>
+
+
+
+<div id="uploadModal" class="modal hidden">
+  <div class="upload-box">
+
+<!-- VIDEOAPNA PHOTO → VIDEO MODE -->
+<div id="photoVideoMode" class="photo-video-mode">
+
+  <div class="photo-video-title">
+    📷 फोटो से Automatic Video
+  </div>
+
+  <p class="photo-video-help">
+    1 से 5 फोटो चुनें और VideoApna अपने आप वीडियो बनाएगा।
+  </p>
+
+  <label class="file-label photo-select-label">
+    📸 फोटो चुनें
+    <input
+      id="photoVideoInput"
+      type="file"
+      accept="image/*"
+      multiple
+      hidden>
+  </label>
+
+  <div id="photoCountText" class="photo-count-text">
+    कोई फोटो नहीं चुनी गई
+  </div>
+
+  <div id="photoPreviewGrid" class="photo-preview-grid"></div>
+
+  <div class="photo-video-options">
+
+    <div class="photo-option-group">
+      <label>⏱️ वीडियो की लंबाई</label>
+      <select id="photoVideoDuration" class="upload-input">
+        <option value="10">10 सेकंड</option>
+        <option value="15">15 सेकंड</option>
+        <option value="20">20 सेकंड</option>
+      </select>
+    </div>
+
+  </div>
+
+  <button
+    type="button"
+    id="generatePhotoVideoBtn"
+    class="publish-btn">
+    🎬 Photo से Video बनाएं
+  </button>
+
+  <p id="photoVideoMessage" class="upload-message"></p>
+
+  <div id="photoVideoResult" class="photo-video-result hidden">
+    <video
+      id="photoVideoResultPlayer"
+      controls
+      playsinline>
+    </video>
+  </div>
+
+</div>
+
+
+    <div class="upload-header">
+      <h2>➕ वीडियो अपलोड करें</h2>
+      <button id="closeUpload">✕</button>
+    </div>
+
+    <label class="file-label">
+      🎬 वीडियो चुनें
+      <input id="videoFile" type="file" accept="video/*" onchange="
+  const f=this.files[0];
+  if(f){
+    const p=document.getElementById('previewPlayer');
+    const b=document.getElementById('videoPreview');
+    p.src=URL.createObjectURL(f);
+    b.classList.remove('hidden');
+    b.style.display = 'block';
+    b.style.visibility = 'visible';
+    b.style.opacity = '1';
+    p.style.display = 'block';
+    p.style.visibility = 'visible';
+    p.style.width = '100%';
+    p.style.height = '240px';
+    p.load();
+    alert('वीडियो चुना गया: ' + f.name);
+  }
+">
+    </label>
+
+    <div id="videoPreview" class="upload-preview hidden">
+      <video id="previewPlayer" controls playsinline></video>
+    </div>
+
+    <input
+      id="uploadTitle"
+      class="upload-input"
+      type="text"
+      placeholder="वीडियो का Title">
+
+    <textarea
+      id="uploadDescription"
+      class="upload-input upload-textarea"
+      placeholder="वीडियो के बारे में लिखें..."></textarea>
+
+    <select id="uploadCategory" class="upload-input">
+      <option value="मनोरंजन">मनोरंजन</option>
+      <option value="संगीत">संगीत</option>
+      <option value="शिक्षा">शिक्षा</option>
+      <option value="न्यूज़">न्यूज़</option>
+      <option value="खेल">खेल</option>
+    </select>
+
+    <!-- VIDEOAPNA VIDEO TEMPLATE -->
+      <div id="templatePicker" class="template-picker">
+
+        <div class="template-title">🎨 Video Template</div>
+
+        <div class="template-list">
+
+          <button type="button" class="template-item active" data-template="normal">
+            🎬 Normal
+          </button>
+
+          <button type="button" class="template-item" data-template="cinematic">
+            🎞️ Cinematic
+          </button>
+
+          <button type="button" class="template-item" data-template="bright">
+            ☀️ Bright
+          </button>
+
+          <button type="button" class="template-item" data-template="vintage">
+            📼 Vintage
+          </button>
+
+          <button type="button" class="template-item" data-template="cool">
+            ❄️ Cool
+          </button>
+
+        </div>
+
+        <input type="hidden" id="selectedTemplate" value="normal">
+
+      </div>
+
+      <!-- VIDEOAPNA SOUND PICKER -->
+    <div id="soundPicker" class="sound-picker">
+
+      <button
+        type="button"
+        id="chooseSoundBtn"
+        class="sound-picker-btn">
+        🎵 Sound चुनें
+      </button>
+
+      <label
+        for="phoneSoundInput"
+        class="sound-picker-btn phone-sound-btn">
+        📱 फोन से Sound चुनें
+      </label>
+
+      <input
+        id="phoneSoundInput"
+        type="file"
+        accept="audio/*"
+        hidden>
+
+      <div id="selectedSound" class="selected-sound hidden">
+        <span id="selectedSoundTitle">कोई Sound नहीं चुना</span>
+        <button type="button" id="removeSoundBtn">✕</button>
+      </div>
+
+      <div id="soundPanel" class="sound-panel hidden">
+
+        <div class="sound-panel-header">
+          <strong>🎵 Sound चुनें</strong>
+          <button type="button" id="closeSoundBtn">✕</button>
+        </div>
+
+        <div id="soundList" class="sound-list">
+          <p>🎵 Sounds load हो रहे हैं...</p>
+        </div>
+
+      </div>
+
+    </div>
+
+    <button type="button" id="publishBtn" class="publish-btn">
+      🚀 Publish
+    </button>
+
+    <p id="uploadMessage" class="upload-message"></p>
+
+  </div>
+</div>
+
+<script src="app.js?v=11"></script>
+
+
+
+
+
+</body>
+</html>

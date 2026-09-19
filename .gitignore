@@ -1,0 +1,52 @@
+.env
+.env.*
+node_modules/
+uploads/
+
+*.bak
+*.backup
+
+server.before-*.js
+public.app.before-*.js
+app.before-*.js
+
+backup-*/
+
+*-test.json
+test-*.js
+
+android/
+
+server.js.bak-*
+dosya-test.txt
+
+# All backup / old versions
+*.backup*
+*.bak*
+*.before-*
+server.before-*
+public.app.before-*
+app.before-*
+server.js.bak-*
+public/index*.backup*
+public/style*.backup*
+
+# Local/private application data
+data/users.json
+data/user-watch-events.json
+data/video-reports.json
+
+# Video data backups
+data/videos.before-*.json
+
+# Public JS backup / old versions
+public/app.broken.js
+public/app.final-backup.js
+public/app.home-recommendation-broken.js
+public/app.js.nav-backup
+public/app.js.nav-final-backup
+public/app.js.sound-fix-backup
+public/app.runtime-backup.js
+public/app.syntax-error.js
+
+public/index.html.nav-backup
