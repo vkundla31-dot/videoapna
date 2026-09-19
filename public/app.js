@@ -3451,54 +3451,60 @@ function openPeerTubeWatchingPage(video) {
   if (nextList) {
 
     /*
-     * VideoApna + PeerTube दोनों sources
-     * से Next Videos बनाए जाएँगे।
+     * Home में दिखाई गई वही पूरी Long-video list
+     * Watch Page के नीचे भी दिखाई जाएगी।
+     *
+     * इसमें:
+     * - VideoApna
+     * - Odysee
+     * - PeerTube
+     * सभी शामिल हैं।
+     *
+     * 6-video limit नहीं है।
      */
-    const ownVideos =
-      typeof getVideoApnaPublicVideos ===
-      "function"
-        ? getVideoApnaPublicVideos("videos")
-        : [];
 
-    const allNextVideos = [
-      ...ownVideos,
-      ...peerTubeVideos
-    ];
+    const allHomeVideos =
+      Array.isArray(currentLongHomeVideos)
+        ? currentLongHomeVideos
+        : [];
 
     const uniqueNextVideos = [];
     const nextKeys = new Set();
 
-    for (const nextVideo of allNextVideos) {
+    for (const nextVideo of allHomeVideos) {
+
+      if (!nextVideo) continue;
 
       const key =
-        String(
-          nextVideo.source ||
-          "video"
-        ) +
+        String(nextVideo.source || "video") +
         ":" +
         String(
+          nextVideo.vcdnVideoId ||
+          nextVideo.odyseeId ||
           nextVideo.uuid ||
           nextVideo.id ||
           nextVideo.url ||
           ""
         );
 
-      if (
-        !nextKeys.has(key) &&
-        String(nextVideo.id) !==
-          String(video.id)
-      ) {
-
-        nextKeys.add(key);
-        uniqueNextVideos.push(
-          nextVideo
+      const currentKey =
+        String(video.source || "video") +
+        ":" +
+        String(
+          video.vcdnVideoId ||
+          video.odyseeId ||
+          video.uuid ||
+          video.id ||
+          video.url ||
+          ""
         );
-      }
 
       if (
-        uniqueNextVideos.length >= 6
+        key !== currentKey &&
+        !nextKeys.has(key)
       ) {
-        break;
+        nextKeys.add(key);
+        uniqueNextVideos.push(nextVideo);
       }
     }
 
@@ -3980,20 +3986,16 @@ function openOdyseeWatchingPage(video) {
   if (nextList) {
 
     /*
-     * पहले Odysee search से videos लाने की कोशिश।
-     * Search fail/empty होने पर Home के available
-     * videos से fallback दिखाया जाएगा।
+     * Home में दिखाई गई वही पूरी Long-video list
+     * Watch Page के नीचे भी दिखाई जाएगी।
      */
 
-    nextList.innerHTML = `
-      <div style="
-        padding:12px;
-        text-align:center;
-        color:#888;
-      ">
-        ⏳ अगला वीडियो लोड हो रहा है...
-      </div>
-    `;
+    nextList.innerHTML = "";
+
+    const homeVideos =
+      Array.isArray(currentLongHomeVideos)
+        ? currentLongHomeVideos
+        : [];
 
     const currentId =
       String(
@@ -4031,7 +4033,7 @@ function openOdyseeWatchingPage(video) {
             );
 
           })
-          .slice(0, 6);
+          ;
 
       if (!nextVideos.length) {
 
@@ -4165,71 +4167,7 @@ function openOdyseeWatchingPage(video) {
 
     };
 
-    const fallbackVideos = function () {
-
-      const externalVideos =
-        Array.isArray(odyseeVideos)
-          ? odyseeVideos
-          : [];
-
-      renderNextVideos(
-        externalVideos
-      );
-
-    };
-
-    const nextQuery =
-      String(
-        video.title ||
-        "hindi bhajan"
-      ).trim();
-
-    fetch(
-      "/api/odysee-search?q=" +
-      encodeURIComponent(nextQuery) +
-      "&start=0"
-    )
-      .then(function (response) {
-
-        if (!response.ok) {
-          throw new Error(
-            "Odysee search failed"
-          );
-        }
-
-        return response.json();
-
-      })
-      .then(function (data) {
-
-        if (
-          data &&
-          data.success &&
-          Array.isArray(data.videos) &&
-          data.videos.length
-        ) {
-
-          renderNextVideos(
-            data.videos
-          );
-
-        } else {
-
-          fallbackVideos();
-
-        }
-
-      })
-      .catch(function (error) {
-
-        console.error(
-          "Odysee next video error:",
-          error
-        );
-
-        fallbackVideos();
-
-      });
+    renderNextVideos(homeVideos);
 
   }
 
