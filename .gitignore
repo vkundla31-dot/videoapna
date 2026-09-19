@@ -50,3 +50,4 @@ public/app.runtime-backup.js
 public/app.syntax-error.js
 
 public/index.html.nav-backup
+server.js.render-backup

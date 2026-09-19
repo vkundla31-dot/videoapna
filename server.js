@@ -249,7 +249,7 @@ async function uploadVideoToVcdn(filePath, title = "VideoApna Video") {
 }
 
 const app = express();
-const PORT = 8080;
+const PORT = process.env.PORT || 8080;
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, "public");
