@@ -1112,6 +1112,209 @@ function saveVideos(videos) {
   fs.writeFileSync(DB, JSON.stringify(videos, null, 2));
 }
 
+
+/* ==========================================
+   VIDEOAPNA CURATED MUSIC LIBRARY
+   CC0 music bundled with VideoApna
+========================================== */
+
+const CURATED_MUSIC_LIBRARY = [
+  {
+    id: "cc0-dream-ambience",
+    title: "Dream Ambience",
+    channel: "VideoApna • CC0 Music",
+    url: "/music/Dream-Ambience.mp3",
+    license: "CC0",
+    source: "OpenGameArt"
+  },
+  {
+    id: "cc0-chase",
+    title: "Chase",
+    channel: "VideoApna • CC0 Music",
+    url: "/music/Chase.mp3",
+    license: "CC0",
+    source: "OpenGameArt"
+  },
+  {
+    id: "cc0-perces",
+    title: "Perces",
+    channel: "VideoApna • CC0 Music",
+    url: "/music/Perces.mp3",
+    license: "CC0",
+    source: "OpenGameArt"
+  },
+  {
+    id: "cc0-joining-forces",
+    title: "Joining Forces",
+    channel: "VideoApna • CC0 Music",
+    url: "/music/Joining-Forces.mp3",
+    license: "CC0",
+    source: "OpenGameArt"
+  },
+  {
+    id: "cc0-our-expanse",
+    title: "Our Expanse",
+    channel: "VideoApna • CC0 Music",
+    url: "/music/Our-Expanse.mp3",
+    license: "CC0",
+    source: "OpenGameArt"
+  }
+];
+
+function getAllSounds() {
+  const userSounds = readSounds().filter(
+    sound => sound.visibility !== "private"
+  );
+
+  return [
+    ...CURATED_MUSIC_LIBRARY,
+    ...userSounds
+  ];
+}
+
+
+function resolveSoundFile(sound) {
+  if (!sound || !sound.url) {
+    return null;
+  }
+
+  const url = String(sound.url);
+
+  let baseDir = null;
+  let relativePath = null;
+
+  if (url.startsWith("/music/")) {
+    baseDir = PUBLIC;
+    relativePath = url.slice("/music/".length);
+  } else if (url.startsWith("/uploads/")) {
+    baseDir = UPLOADS;
+    relativePath = url.slice("/uploads/".length);
+  } else {
+    return null;
+  }
+
+  const fullPath = path.resolve(
+    baseDir,
+    relativePath
+  );
+
+  const rootPath =
+    path.resolve(baseDir) + path.sep;
+
+  if (!fullPath.startsWith(rootPath)) {
+    return null;
+  }
+
+  if (!fs.existsSync(fullPath)) {
+    return null;
+  }
+
+  return fullPath;
+}
+
+async function mergeAudioIntoVideo(
+  videoPath,
+  soundPath,
+  outputPath,
+  durationSeconds = null
+) {
+  return new Promise((resolve, reject) => {
+
+    const args = [
+      "-y",
+
+      "-i",
+      videoPath,
+
+      "-stream_loop",
+      "-1",
+
+      "-i",
+      soundPath,
+
+      "-map",
+      "0:v:0",
+
+      "-map",
+      "1:a:0",
+
+      "-c:v",
+      "copy",
+
+      "-c:a",
+      "aac",
+
+      "-b:a",
+      "128k"
+    ];
+
+    if (durationSeconds) {
+      args.push(
+        "-t",
+        String(durationSeconds)
+      );
+    } else {
+      args.push("-shortest");
+    }
+
+    args.push(
+      "-movflags",
+      "+faststart",
+      outputPath
+    );
+
+    execFile(
+      "ffmpeg",
+      args,
+      {
+        maxBuffer: 20 * 1024 * 1024
+      },
+      (error, stdout, stderr) => {
+
+        if (error) {
+          console.error(
+            "AUDIO MERGE ERROR:",
+            stderr || error.message
+          );
+
+          reject(
+            new Error(
+              "Video में Music जोड़ना असफल हुआ।"
+            )
+          );
+
+          return;
+        }
+
+        console.log(
+          "AUDIO MERGED INTO VIDEO:",
+          outputPath
+        );
+
+        resolve();
+      }
+    );
+  });
+}
+
+function findAllowedSound(soundId) {
+  const id = String(soundId || "").trim();
+
+  if (!id) return null;
+
+  const curated = CURATED_MUSIC_LIBRARY.find(
+    sound => String(sound.id) === id
+  );
+
+  if (curated) return curated;
+
+  const userSounds = readSounds();
+
+  return userSounds.find(
+    sound => String(sound.id) === id
+  ) || null;
+}
+
 function readSounds() {
   try {
     return JSON.parse(fs.readFileSync(SOUNDS_DB, "utf8"));
@@ -1175,12 +1378,137 @@ app.get("/api/videos", (req, res) => {
 
 app.get("/api/sounds", (req, res) => {
   try {
-    res.json(readSounds());
+    res.json(getAllSounds());
   } catch (error) {
     console.error(error);
     res.status(500).json({
       success: false,
       message: "Sounds load नहीं हो पाए।"
+    });
+  }
+});
+
+
+app.post("/api/private-sound", audioUpload.single("audio"), (req, res) => {
+  try {
+
+    const authenticated =
+      req.session &&
+      req.session.userAuthenticated === true;
+
+    const sessionUserId =
+      authenticated
+        ? String(req.session.userId || "").trim()
+        : "";
+
+    if (!authenticated || !sessionUserId) {
+
+      if (req.file) {
+        try {
+          if (
+            req.file.path &&
+            fs.existsSync(req.file.path)
+          ) {
+            fs.unlinkSync(req.file.path);
+          }
+        } catch {}
+      }
+
+      return res.status(401).json({
+        success: false,
+        message:
+          "Private Sound के लिए पहले Login करें।"
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Audio चुनें।"
+      });
+    }
+
+    const title =
+      String(
+        req.body.title ||
+        req.file.originalname ||
+        "My Sound"
+      ).trim();
+
+    const sound = {
+      id:
+        "private-" +
+        Date.now() +
+        "-" +
+        Math.random()
+          .toString(36)
+          .slice(2, 8),
+
+      userId: sessionUserId,
+
+      ownerUserId: sessionUserId,
+
+      title:
+        title || "My Sound",
+
+      channel:
+        "My Sound",
+
+      url:
+        "/uploads/" +
+        req.file.filename,
+
+      fileName:
+        req.file.originalname,
+
+      visibility:
+        "private",
+
+      createdAt:
+        new Date().toISOString(),
+
+      uses: 0
+    };
+
+    const sounds =
+      readSounds();
+
+    sounds.unshift(sound);
+
+    saveSounds(sounds);
+
+    res.json({
+      success: true,
+
+      message:
+        "Private Sound तैयार है।",
+
+      sound
+    });
+
+  } catch (error) {
+
+    console.error(
+      "PRIVATE SOUND ERROR:",
+      error
+    );
+
+    if (req.file) {
+      try {
+        if (
+          req.file.path &&
+          fs.existsSync(req.file.path)
+        ) {
+          fs.unlinkSync(req.file.path);
+        }
+      } catch {}
+    }
+
+    res.status(500).json({
+      success: false,
+
+      message:
+        "Private Sound upload नहीं हो पाया।"
     });
   }
 });
@@ -1332,6 +1660,7 @@ function applyVideoTemplate(inputPath, outputPath, template) {
 app.post("/api/upload", upload.single("video"), async (req, res) => {
   let originalPath = null;
   let processedPath = null;
+  let soundMergedPath = null;
 
   try {
     if (!req.file) {
@@ -1354,8 +1683,7 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
       });
     }
 
-    // Video का owner अब केवल logged-in session से लिया जाएगा।
-    // Client द्वारा भेजे गए userId पर भरोसा नहीं करेंगे।
+    // केवल logged-in session user ही video upload कर सकता है।
     const sessionUserAuthenticated =
       req.session && req.session.userAuthenticated === true;
 
@@ -1369,11 +1697,16 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
 
       return res.status(401).json({
         success: false,
-        message: "वीडियो Upload करने के लिए पहले अपने VideoApna Account में Login करें।"
+        message:
+          "वीडियो Upload करने के लिए पहले अपने VideoApna Account में Login करें।"
       });
     }
 
-    const template = String(req.body.template || "normal").trim();
+    // ------------------------------------------------------------
+    // Video Template
+    // ------------------------------------------------------------
+    const template =
+      String(req.body.template || "normal").trim();
 
     const allowedTemplates = [
       "normal",
@@ -1383,26 +1716,81 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
       "cool"
     ];
 
-    const safeTemplate = allowedTemplates.includes(template)
-      ? template
-      : "normal";
+    const safeTemplate =
+      allowedTemplates.includes(template)
+        ? template
+        : "normal";
 
-    /*
-      Original upload:
-      123456-abc123.mp4
+    // ------------------------------------------------------------
+    // Selected Music को server-side validate करें।
+    // Client के भेजे soundUrl पर भरोसा नहीं करेंगे।
+    // ------------------------------------------------------------
+    const requestedSoundId =
+      String(req.body.soundId || "").trim();
 
-      Processed video:
-      123456-abc123-template.mp4
-    */
-    const ext = path.extname(req.file.filename) || ".mp4";
+    const selectedSound =
+      findAllowedSound(requestedSoundId);
+
+    if (requestedSoundId && !selectedSound) {
+      fs.unlinkSync(originalPath);
+
+      return res.status(400).json({
+        success: false,
+        message: "Selected Sound उपलब्ध नहीं है।"
+      });
+    }
+
+    let selectedSoundPath = null;
+
+    if (selectedSound) {
+
+      // Private Sound केवल उसके owner को इस्तेमाल करने दें।
+      if (
+        selectedSound.visibility === "private" &&
+        String(
+          selectedSound.ownerUserId ||
+          selectedSound.userId ||
+          ""
+        ) !== String(userId)
+      ) {
+        fs.unlinkSync(originalPath);
+
+        return res.status(403).json({
+          success: false,
+          message: "यह Private Sound आपके खाते का नहीं है।"
+        });
+      }
+
+      selectedSoundPath =
+        resolveSoundFile(selectedSound);
+
+      if (!selectedSoundPath) {
+        fs.unlinkSync(originalPath);
+
+        return res.status(400).json({
+          success: false,
+          message: "Selected Sound file उपलब्ध नहीं है।"
+        });
+      }
+    }
+
+    // ------------------------------------------------------------
+    // Template Apply
+    // ------------------------------------------------------------
+    const ext =
+      path.extname(req.file.filename) || ".mp4";
 
     const processedFilename =
       path.basename(req.file.filename, ext) +
       "-template.mp4";
 
-    processedPath = path.join(UPLOADS, processedFilename);
+    processedPath =
+      path.join(UPLOADS, processedFilename);
 
-    console.log("VIDEO TEMPLATE REQUEST:", safeTemplate);
+    console.log(
+      "VIDEO TEMPLATE REQUEST:",
+      safeTemplate
+    );
 
     await applyVideoTemplate(
       originalPath,
@@ -1410,7 +1798,7 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
       safeTemplate
     );
 
-    // Processing successful, original temporary upload हटाएँ.
+    // Original temporary upload हटाएँ।
     if (
       originalPath !== processedPath &&
       fs.existsSync(originalPath)
@@ -1418,38 +1806,56 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
       fs.unlinkSync(originalPath);
     }
 
+    originalPath = null;
+
     // ------------------------------------------------------------
-    // Video duration — Shorts पहचानने के लिए
+    // Video duration
     // ------------------------------------------------------------
     let videoDuration = 0;
 
     try {
-      const durationProbe = await new Promise((resolve, reject) => {
-        execFile(
-          "ffprobe",
-          [
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            processedPath
-          ],
-          (error, stdout, stderr) => {
-            if (error) {
-              reject(error);
-              return;
+      const durationProbe =
+        await new Promise((resolve, reject) => {
+
+          execFile(
+            "ffprobe",
+            [
+              "-v",
+              "error",
+              "-show_entries",
+              "format=duration",
+              "-of",
+              "default=noprint_wrappers=1:nokey=1",
+              processedPath
+            ],
+            (error, stdout, stderr) => {
+
+              if (error) {
+                reject(error);
+                return;
+              }
+
+              const value =
+                Number(
+                  String(stdout || "").trim()
+                );
+
+              if (
+                !Number.isFinite(value) ||
+                value < 0
+              ) {
+                reject(
+                  new Error(
+                    "ffprobe ने valid duration नहीं दी।"
+                  )
+                );
+                return;
+              }
+
+              resolve(value);
             }
-
-            const value = Number(String(stdout || "").trim());
-
-            if (!Number.isFinite(value) || value < 0) {
-              reject(new Error("ffprobe ने valid duration नहीं दी।"));
-              return;
-            }
-
-            resolve(value);
-          }
-        );
-      });
+          );
+        });
 
       videoDuration = durationProbe;
 
@@ -1458,7 +1864,9 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
         videoDuration.toFixed(2),
         "seconds"
       );
+
     } catch (durationError) {
+
       console.error(
         "VIDEO DURATION CHECK FAILED:",
         durationError.message
@@ -1466,128 +1874,242 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
     }
 
     // ------------------------------------------------------------
-    // VCDN upload
+    // Music को Video में permanently merge करें।
+    // Public Music और user's Private Music दोनों supported हैं।
     // ------------------------------------------------------------
-    // Local processed file is kept as a safe fallback.
+    if (selectedSoundPath) {
+
+      soundMergedPath =
+        processedPath.replace(
+          /\.mp4$/i,
+          "-with-sound.mp4"
+        );
+
+      console.log(
+        "ADDING SOUND TO VIDEO:",
+        selectedSound.title
+      );
+
+      await mergeAudioIntoVideo(
+        processedPath,
+        selectedSoundPath,
+        soundMergedPath
+      );
+
+      if (fs.existsSync(processedPath)) {
+        fs.unlinkSync(processedPath);
+      }
+
+      fs.renameSync(
+        soundMergedPath,
+        processedPath
+      );
+
+      soundMergedPath = null;
+
+      console.log(
+        "SOUND MERGE COMPLETE:",
+        processedPath
+      );
+    }
+
+    // ------------------------------------------------------------
+    // VCDN upload — अब Music merge होने के बाद
+    // ------------------------------------------------------------
     let vcdn = null;
 
     try {
-      if (String(process.env.VCDN_API_KEY || "").trim()) {
-        console.log("VCDN upload starting:", processedFilename);
 
-        vcdn = await uploadVideoToVcdn(
-          processedPath,
-          title
+      if (
+        String(
+          process.env.VCDN_API_KEY || ""
+        ).trim()
+      ) {
+
+        console.log(
+          "VCDN upload starting:",
+          processedFilename
         );
+
+        vcdn =
+          await uploadVideoToVcdn(
+            processedPath,
+            title
+          );
 
         console.log(
           "VCDN upload ready:",
           vcdn.vcdnVideoId
         );
+
       } else {
+
         console.log(
           "VCDN_API_KEY not configured. Using local video."
         );
       }
+
     } catch (vcdnError) {
+
       console.error(
         "VCDN upload failed. Keeping local video fallback:",
         vcdnError.message
       );
+
       vcdn = null;
     }
 
     const localVideoUrl =
       "/uploads/" + processedFilename;
 
+    // ------------------------------------------------------------
+    // Final Video object
+    // Sound metadata केवल server-side selectedSound से आएगा।
+    // ------------------------------------------------------------
     const video = {
+
       id: Date.now(),
 
-      // जिस user ने यह video upload किया
       userId,
       ownerUserId: userId,
       visibility: "public",
 
       title,
-      description: String(req.body.description || ""),
-      category: String(req.body.category || "मनोरंजन"),
 
-      // Applied Video Template
+      description:
+        String(
+          req.body.description || ""
+        ),
+
+      category:
+        String(
+          req.body.category || "मनोरंजन"
+        ),
+
       template: safeTemplate,
 
       channel: "VideoApna",
+
       views: "0 views",
 
-      // Video duration in seconds.
-      duration: Number(videoDuration || 0),
+      duration:
+        Number(videoDuration || 0),
 
-      // VCDN playback URL when available.
-      // Local URL remains the fallback.
       url:
-        vcdn && vcdn.vcdnPlaybackUrl
+        vcdn &&
+        vcdn.vcdnPlaybackUrl
           ? vcdn.vcdnPlaybackUrl
           : localVideoUrl,
 
-      // Keep local URL so the original file remains recoverable.
-      localUrl: localVideoUrl,
+      localUrl:
+        localVideoUrl,
 
-      fileName: req.file.originalname,
+      fileName:
+        req.file.originalname,
 
-      // VCDN information
       vcdnVideoId:
-        vcdn ? vcdn.vcdnVideoId : "",
+        vcdn
+          ? vcdn.vcdnVideoId
+          : "",
 
       vcdnStatus:
-        vcdn ? vcdn.vcdnStatus : "local",
+        vcdn
+          ? vcdn.vcdnStatus
+          : "local",
 
       vcdnPlaybackUrl:
-        vcdn ? vcdn.vcdnPlaybackUrl : "",
+        vcdn
+          ? vcdn.vcdnPlaybackUrl
+          : "",
 
       embedUrl:
-        vcdn ? vcdn.vcdnEmbedUrl : "",
+        vcdn
+          ? vcdn.vcdnEmbedUrl
+          : "",
 
       posterUrl:
-        vcdn ? vcdn.vcdnPosterUrl : "",
+        vcdn
+          ? vcdn.vcdnPosterUrl
+          : "",
 
-      // Short Video Sound
-      soundId: String(req.body.soundId || ""),
-      soundTitle: String(req.body.soundTitle || ""),
-      soundUrl: String(req.body.soundUrl || ""),
+      soundId:
+        selectedSound
+          ? String(selectedSound.id)
+          : "",
 
-      createdAt: new Date().toISOString()
+      soundTitle:
+        selectedSound
+          ? String(
+              selectedSound.title || ""
+            )
+          : "",
+
+      soundUrl:
+        selectedSound
+          ? String(
+              selectedSound.url || ""
+            )
+          : "",
+
+      createdAt:
+        new Date().toISOString()
     };
 
     const videos = readVideos();
+
     videos.unshift(video);
+
     saveVideos(videos);
 
     res.json({
       success: true,
+
       message:
         vcdn
-          ? "वीडियो VCDN पर Publish हो गया!"
-          : "वीडियो Template के साथ Publish हो गया!",
+          ? "वीडियो Music के साथ VCDN पर Publish हो गया!"
+          : "वीडियो Music के साथ Publish हो गया!",
+
       video
     });
 
   } catch (error) {
-    console.error("VIDEO UPLOAD/TEMPLATE ERROR:", error);
 
-    // Failed processing में temporary files साफ करें.
+    console.error(
+      "VIDEO UPLOAD/TEMPLATE/SOUND ERROR:",
+      error
+    );
+
+    // Failed processing में temporary files साफ करें।
     try {
-      if (processedPath && fs.existsSync(processedPath)) {
+      if (
+        soundMergedPath &&
+        fs.existsSync(soundMergedPath)
+      ) {
+        fs.unlinkSync(soundMergedPath);
+      }
+    } catch {}
+
+    try {
+      if (
+        processedPath &&
+        fs.existsSync(processedPath)
+      ) {
         fs.unlinkSync(processedPath);
       }
     } catch {}
 
     try {
-      if (originalPath && fs.existsSync(originalPath)) {
+      if (
+        originalPath &&
+        fs.existsSync(originalPath)
+      ) {
         fs.unlinkSync(originalPath);
       }
     } catch {}
 
     res.status(500).json({
       success: false,
+
       message:
         error.message ||
         "वीडियो Publish नहीं हो पाया।"
@@ -1613,10 +2135,13 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
 app.post("/api/photo-to-video", photoUpload.array("photos", 5), async (req, res) => {
   let photoFiles = [];
   let outputPath = null;
+  let soundMergedPath = null;
 
   try {
-    // Photo-to-Video बनाने के लिए Login जरूरी है।
-    // Owner केवल server-side session से लिया जाएगा।
+
+    // ------------------------------------------------------------
+    // Login check
+    // ------------------------------------------------------------
     const authenticated =
       req.session &&
       req.session.userAuthenticated === true;
@@ -1627,11 +2152,16 @@ app.post("/api/photo-to-video", photoUpload.array("photos", 5), async (req, res)
         : "";
 
     if (!authenticated || !sessionUserId) {
+
       const filesToRemove = req.files || [];
 
       for (const file of filesToRemove) {
         try {
-          if (file && file.path && fs.existsSync(file.path)) {
+          if (
+            file &&
+            file.path &&
+            fs.existsSync(file.path)
+          ) {
             fs.unlinkSync(file.path);
           }
         } catch {}
@@ -1639,12 +2169,16 @@ app.post("/api/photo-to-video", photoUpload.array("photos", 5), async (req, res)
 
       return res.status(401).json({
         success: false,
-        message: "Photo से Video बनाने के लिए पहले VideoApna Account में Login करें।"
+        message:
+          "Photo से Short Video बनाने के लिए पहले VideoApna Account में Login करें।"
       });
     }
 
     photoFiles = req.files || [];
 
+    // ------------------------------------------------------------
+    // Photo count
+    // ------------------------------------------------------------
     if (!photoFiles.length) {
       return res.status(400).json({
         success: false,
@@ -1659,16 +2193,61 @@ app.post("/api/photo-to-video", photoUpload.array("photos", 5), async (req, res)
       });
     }
 
-    const duration = Number(req.body.duration || 10);
+    // ------------------------------------------------------------
+    // Title — Photo Short के लिए जरूरी
+    // ------------------------------------------------------------
+    const photoVideoTitle =
+      String(req.body.title || "").trim();
 
-    if (![10, 15, 20].includes(duration)) {
+    if (!photoVideoTitle) {
+
+      for (const photo of photoFiles) {
+        try {
+          if (
+            photo.path &&
+            fs.existsSync(photo.path)
+          ) {
+            fs.unlinkSync(photo.path);
+          }
+        } catch {}
+      }
+
       return res.status(400).json({
         success: false,
-        message: "Duration केवल 10, 15 या 20 सेकंड हो सकती है।"
+        message: "Photo Short का Title लिखें।"
       });
     }
 
-    const template = String(req.body.template || "normal");
+    // ------------------------------------------------------------
+    // Description
+    // ------------------------------------------------------------
+    const photoVideoDescription =
+      String(
+        req.body.description || ""
+      ).trim();
+
+    // ------------------------------------------------------------
+    // Duration
+    // ------------------------------------------------------------
+    const duration =
+      Number(req.body.duration || 10);
+
+    if (![10, 15, 20].includes(duration)) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Duration केवल 10, 15 या 20 सेकंड हो सकती है।"
+      });
+    }
+
+    // ------------------------------------------------------------
+    // Template
+    // ------------------------------------------------------------
+    const template =
+      String(
+        req.body.template || "normal"
+      ).trim();
 
     const allowedTemplates = [
       "normal",
@@ -1678,46 +2257,159 @@ app.post("/api/photo-to-video", photoUpload.array("photos", 5), async (req, res)
       "cool"
     ];
 
-    const safeTemplate = allowedTemplates.includes(template)
-      ? template
-      : "normal";
+    const safeTemplate =
+      allowedTemplates.includes(template)
+        ? template
+        : "normal";
 
+    // ------------------------------------------------------------
+    // Music validation
+    // ------------------------------------------------------------
+    const requestedSoundId =
+      String(
+        req.body.soundId || ""
+      ).trim();
+
+    const selectedSound =
+      findAllowedSound(
+        requestedSoundId
+      );
+
+    if (
+      requestedSoundId &&
+      !selectedSound
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Selected Sound उपलब्ध नहीं है।"
+      });
+    }
+
+    let selectedSoundPath = null;
+
+    if (selectedSound) {
+
+      // Private Sound केवल उसके owner को।
+      if (
+        selectedSound.visibility === "private" &&
+        String(
+          selectedSound.ownerUserId ||
+          selectedSound.userId ||
+          ""
+        ) !== String(sessionUserId)
+      ) {
+
+        return res.status(403).json({
+          success: false,
+          message:
+            "यह Private Sound आपके खाते का नहीं है।"
+        });
+      }
+
+      selectedSoundPath =
+        resolveSoundFile(
+          selectedSound
+        );
+
+      if (!selectedSoundPath) {
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "Selected Sound file उपलब्ध नहीं है।"
+        });
+      }
+    }
+
+    // ------------------------------------------------------------
+    // Output filename
+    // ------------------------------------------------------------
     const outputFilename =
-      Date.now() + "-" +
-      Math.random().toString(36).slice(2, 8) +
-      "-photo-video.mp4";
+      Date.now() +
+      "-" +
+      Math.random()
+        .toString(36)
+        .slice(2, 8) +
+      "-photo-short.mp4";
 
-    outputPath = path.join(UPLOADS, outputFilename);
+    outputPath =
+      path.join(
+        UPLOADS,
+        outputFilename
+      );
 
-    const eachDuration = duration / photoFiles.length;
+    // हर photo की duration।
+    const eachDuration =
+      duration / photoFiles.length;
 
+    // ------------------------------------------------------------
+    // Template filters
+    // ------------------------------------------------------------
     const filterMap = {
+
       normal: "",
-      cinematic: "eq=contrast=1.12:saturation=1.08:brightness=-0.01",
-      bright: "eq=brightness=0.06:contrast=1.05:saturation=1.10",
-      vintage: "eq=contrast=1.05:saturation=0.82:brightness=0.02,colorbalance=rs=.06:gs=.02:bs=-.03",
-      cool: "eq=contrast=1.05:saturation=1.06:brightness=0.01,colorbalance=rs=-.03:gs=.01:bs=.08"
+
+      cinematic:
+        "eq=contrast=1.12:saturation=1.08:brightness=-0.01",
+
+      bright:
+        "eq=brightness=0.06:contrast=1.05:saturation=1.10",
+
+      vintage:
+        "eq=contrast=1.05:saturation=0.82:brightness=0.02," +
+        "colorbalance=rs=.06:gs=.02:bs=-.03",
+
+      cool:
+        "eq=contrast=1.05:saturation=1.06:brightness=0.01," +
+        "colorbalance=rs=-.03:gs=.01:bs=.08"
     };
 
     const tempFiles = [];
 
     try {
-      for (let i = 0; i < photoFiles.length; i++) {
-        const photo = photoFiles[i];
+
+      // ----------------------------------------------------------
+      // प्रत्येक Photo को Video part में बदलना
+      // ----------------------------------------------------------
+      for (
+        let i = 0;
+        i < photoFiles.length;
+        i++
+      ) {
+
+        const photo =
+          photoFiles[i];
 
         const tempName =
-          Date.now() + "-" +
-          Math.random().toString(36).slice(2, 8) +
-          "-photo-part-" + i + ".mp4";
+          Date.now() +
+          "-" +
+          Math.random()
+            .toString(36)
+            .slice(2, 8) +
+          "-photo-part-" +
+          i +
+          ".mp4";
 
-        const tempPath = path.join(UPLOADS, tempName);
-        tempFiles.push(tempPath);
+        const tempPath =
+          path.join(
+            UPLOADS,
+            tempName
+          );
+
+        tempFiles.push(
+          tempPath
+        );
 
         let vf =
           "scale=720:1280:force_original_aspect_ratio=increase," +
           "crop=720:1280,fps=30";
 
-        if (safeTemplate === "cinematic") {
+        if (
+          safeTemplate === "cinematic"
+        ) {
+
           vf =
             "scale=720:1280:force_original_aspect_ratio=increase," +
             "crop=720:1280," +
@@ -1727,244 +2419,546 @@ app.post("/api/photo-to-video", photoUpload.array("photos", 5), async (req, res)
             "d=1:s=720x1280:fps=30";
         }
 
-        if (filterMap[safeTemplate] && safeTemplate !== "cinematic") {
-          vf += "," + filterMap[safeTemplate];
+        if (
+          filterMap[safeTemplate] &&
+          safeTemplate !== "cinematic"
+        ) {
+
+          vf +=
+            "," +
+            filterMap[safeTemplate];
         }
 
-        console.log("PHOTO VIDEO PART:", i + 1);
-        console.log("Photo:", photo.path);
+        console.log(
+          "PHOTO SHORT PART:",
+          i + 1
+        );
 
-        await new Promise((resolve, reject) => {
+        console.log(
+          "Photo:",
+          photo.path
+        );
+
+        await new Promise(
+          (resolve, reject) => {
+
+            execFile(
+              "ffmpeg",
+              [
+                "-y",
+
+                "-loop",
+                "1",
+
+                "-i",
+                photo.path,
+
+                "-t",
+                String(
+                  eachDuration
+                ),
+
+                "-vf",
+                vf,
+
+                "-r",
+                "30",
+
+                "-c:v",
+                "libx264",
+
+                "-preset",
+                "ultrafast",
+
+                "-crf",
+                "23",
+
+                "-pix_fmt",
+                "yuv420p",
+
+                "-an",
+
+                tempPath
+              ],
+              {
+                maxBuffer:
+                  20 * 1024 * 1024
+              },
+              (
+                error,
+                stdout,
+                stderr
+              ) => {
+
+                if (error) {
+
+                  console.error(
+                    "PHOTO SHORT PART ERROR:",
+                    stderr ||
+                    error.message
+                  );
+
+                  reject(
+                    new Error(
+                      "Photo से Short Video नहीं बन पाया।"
+                    )
+                  );
+
+                  return;
+                }
+
+                console.log(
+                  "PHOTO SHORT PART READY:",
+                  tempPath
+                );
+
+                resolve();
+              }
+            );
+          }
+        );
+      }
+
+      // ----------------------------------------------------------
+      // सभी photo parts को एक video में जोड़ना
+      // ----------------------------------------------------------
+      const concatFile =
+        path.join(
+          UPLOADS,
+          Date.now() +
+          "-photo-short-concat.txt"
+        );
+
+      const concatContent =
+        tempFiles
+          .map(
+            file =>
+              "file '" +
+              file.replace(
+                /'/g,
+                "'\\''"
+              ) +
+              "'"
+          )
+          .join("\n");
+
+      fs.writeFileSync(
+        concatFile,
+        concatContent
+      );
+
+      await new Promise(
+        (resolve, reject) => {
+
           execFile(
             "ffmpeg",
             [
               "-y",
-              "-loop", "1",
-              "-i", photo.path,
-              "-t", String(eachDuration),
-              "-vf", vf,
-              "-r", "30",
-              "-c:v", "libx264",
-              "-preset", "ultrafast",
-              "-crf", "23",
-              "-pix_fmt", "yuv420p",
-              "-an",
-              tempPath
+
+              "-f",
+              "concat",
+
+              "-safe",
+              "0",
+
+              "-i",
+              concatFile,
+
+              "-c",
+              "copy",
+
+              "-movflags",
+              "+faststart",
+
+              outputPath
             ],
             {
-              maxBuffer: 20 * 1024 * 1024
+              maxBuffer:
+                20 * 1024 * 1024
             },
-            (error, stdout, stderr) => {
+            (
+              error,
+              stdout,
+              stderr
+            ) => {
+
+              try {
+                if (
+                  fs.existsSync(
+                    concatFile
+                  )
+                ) {
+                  fs.unlinkSync(
+                    concatFile
+                  );
+                }
+              } catch {}
+
               if (error) {
+
                 console.error(
-                  "PHOTO VIDEO PART ERROR:",
-                  stderr || error.message
+                  "PHOTO SHORT CONCAT ERROR:",
+                  stderr ||
+                  error.message
                 );
-                reject(new Error("Photo से Video नहीं बन पाया।"));
+
+                reject(
+                  new Error(
+                    "Photo से Short Video नहीं बन पाया।"
+                  )
+                );
+
                 return;
               }
 
-              console.log("PHOTO VIDEO PART READY:", tempPath);
+              console.log(
+                "PHOTO SHORT FINAL READY:",
+                outputPath
+              );
+
               resolve();
             }
           );
-        });
-      }
-
-      const concatFile =
-        path.join(
-          UPLOADS,
-          Date.now() + "-photo-concat.txt"
-        );
-
-      const concatContent = tempFiles
-        .map(file => "file '" + file.replace(/'/g, "'\\''") + "'")
-        .join("\n");
-
-      fs.writeFileSync(concatFile, concatContent);
-
-      await new Promise((resolve, reject) => {
-        execFile(
-          "ffmpeg",
-          [
-            "-y",
-            "-f", "concat",
-            "-safe", "0",
-            "-i", concatFile,
-            "-c", "copy",
-            "-movflags", "+faststart",
-            outputPath
-          ],
-          {
-            maxBuffer: 20 * 1024 * 1024
-          },
-          (error, stdout, stderr) => {
-            try {
-              if (fs.existsSync(concatFile)) {
-                fs.unlinkSync(concatFile);
-              }
-            } catch {}
-
-            if (error) {
-              console.error(
-                "PHOTO VIDEO CONCAT ERROR:",
-                stderr || error.message
-              );
-              reject(new Error("Photo से Video नहीं बन पाया।"));
-              return;
-            }
-
-            console.log("PHOTO VIDEO FINAL READY:", outputPath);
-            resolve();
-          }
-        );
-      });
+        }
+      );
 
     } finally {
-      for (const tempFile of tempFiles) {
+
+      // Temporary photo-video parts हटाएँ।
+      for (
+        const tempFile of tempFiles
+      ) {
+
         try {
-          if (fs.existsSync(tempFile)) {
-            fs.unlinkSync(tempFile);
+
+          if (
+            fs.existsSync(
+              tempFile
+            )
+          ) {
+            fs.unlinkSync(
+              tempFile
+            );
           }
+
         } catch {}
       }
     }
 
+    // ------------------------------------------------------------
+    // Music को Photo Short में permanently merge करें।
+    // Audio loop होगा और Short की exact duration पर कटेगा।
+    // ------------------------------------------------------------
+    if (selectedSoundPath) {
+
+      soundMergedPath =
+        outputPath.replace(
+          /\.mp4$/i,
+          "-with-sound.mp4"
+        );
+
+      console.log(
+        "ADDING SOUND TO PHOTO SHORT:",
+        selectedSound.title
+      );
+
+      await mergeAudioIntoVideo(
+        outputPath,
+        selectedSoundPath,
+        soundMergedPath,
+        duration
+      );
+
+      if (
+        fs.existsSync(
+          outputPath
+        )
+      ) {
+        fs.unlinkSync(
+          outputPath
+        );
+      }
+
+      fs.renameSync(
+        soundMergedPath,
+        outputPath
+      );
+
+      soundMergedPath = null;
+
+      console.log(
+        "PHOTO SHORT SOUND MERGE COMPLETE:",
+        outputPath
+      );
+    }
 
     // ------------------------------------------------------------
-    // VCDN upload for Photo -> Video
+    // VCDN upload — Music merge के बाद
     // ------------------------------------------------------------
     const photoVideoLocalUrl =
-      "/uploads/" + outputFilename;
-
-    const photoVideoTitle =
-      String(req.body.title || "Photo Video")
-        .trim() || "Photo Video";
+      "/uploads/" +
+      outputFilename;
 
     let vcdn = null;
 
     try {
-      if (String(process.env.VCDN_API_KEY || "").trim()) {
+
+      if (
+        String(
+          process.env.VCDN_API_KEY ||
+          ""
+        ).trim()
+      ) {
+
         console.log(
-          "VCDN Photo Video upload starting:",
+          "VCDN Photo Short upload starting:",
           outputFilename
         );
 
-        vcdn = await uploadVideoToVcdn(
-          outputPath,
-          photoVideoTitle
-        );
+        vcdn =
+          await uploadVideoToVcdn(
+            outputPath,
+            photoVideoTitle
+          );
 
         console.log(
-          "VCDN Photo Video upload ready:",
+          "VCDN Photo Short upload ready:",
           vcdn.vcdnVideoId
         );
+
       } else {
+
         console.log(
-          "VCDN_API_KEY not configured. Using local Photo Video."
+          "VCDN_API_KEY not configured. Using local Photo Short."
         );
       }
-    } catch (vcdnError) {
+
+    } catch (
+      vcdnError
+    ) {
+
       console.error(
-        "VCDN Photo Video upload failed. Keeping local fallback:",
+        "VCDN Photo Short upload failed. Keeping local fallback:",
         vcdnError.message
       );
+
       vcdn = null;
     }
 
+    // ------------------------------------------------------------
+    // Final Video object
+    // ------------------------------------------------------------
     const video = {
+
       id: Date.now(),
-      userId: sessionUserId,
-      ownerUserId: sessionUserId,
-      visibility: "public",
 
-      title: photoVideoTitle,
-      description: String(req.body.description || ""),
-      category: String(req.body.category || "मनोरंजन"),
+      userId:
+        sessionUserId,
 
-      template: safeTemplate,
-      channel: "VideoApna",
-      views: "0 views",
+      ownerUserId:
+        sessionUserId,
 
-      // VCDN playback URL when available.
-      // Local URL remains the fallback.
+      visibility:
+        "public",
+
+      title:
+        photoVideoTitle,
+
+      description:
+        photoVideoDescription,
+
+      category:
+        String(
+          req.body.category ||
+          "मनोरंजन"
+        ),
+
+      template:
+        safeTemplate,
+
+      channel:
+        "VideoApna",
+
+      views:
+        "0 views",
+
       url:
-        vcdn && vcdn.vcdnPlaybackUrl
+        vcdn &&
+        vcdn.vcdnPlaybackUrl
           ? vcdn.vcdnPlaybackUrl
           : photoVideoLocalUrl,
 
-      // Keep local Photo -> Video URL.
-      localUrl: photoVideoLocalUrl,
+      localUrl:
+        photoVideoLocalUrl,
 
-      fileName: outputFilename,
+      fileName:
+        outputFilename,
 
-      // VCDN information
       vcdnVideoId:
-        vcdn ? vcdn.vcdnVideoId : "",
+        vcdn
+          ? vcdn.vcdnVideoId
+          : "",
 
       vcdnStatus:
-        vcdn ? vcdn.vcdnStatus : "local",
+        vcdn
+          ? vcdn.vcdnStatus
+          : "local",
 
       vcdnPlaybackUrl:
-        vcdn ? vcdn.vcdnPlaybackUrl : "",
+        vcdn
+          ? vcdn.vcdnPlaybackUrl
+          : "",
 
       embedUrl:
-        vcdn ? vcdn.vcdnEmbedUrl : "",
+        vcdn
+          ? vcdn.vcdnEmbedUrl
+          : "",
 
       posterUrl:
-        vcdn ? vcdn.vcdnPosterUrl : "",
+        vcdn
+          ? vcdn.vcdnPosterUrl
+          : "",
 
-      soundId: "",
-      soundTitle: "",
-      duration: duration
+      soundId:
+        selectedSound
+          ? String(
+              selectedSound.id
+            )
+          : "",
+
+      soundTitle:
+        selectedSound
+          ? String(
+              selectedSound.title ||
+              ""
+            )
+          : "",
+
+      soundUrl:
+        selectedSound
+          ? String(
+              selectedSound.url ||
+              ""
+            )
+          : "",
+
+      duration:
+        duration,
+
+      createdAt:
+        new Date().toISOString()
     };
 
-    const videos = readVideos();
-    videos.unshift(video);
-    saveVideos(videos);
+    const videos =
+      readVideos();
 
-    for (const photo of photoFiles) {
+    videos.unshift(
+      video
+    );
+
+    saveVideos(
+      videos
+    );
+
+    // Original uploaded photos अब जरूरी नहीं।
+    for (
+      const photo of photoFiles
+    ) {
+
       try {
-        if (photo.path && fs.existsSync(photo.path)) {
-          fs.unlinkSync(photo.path);
+
+        if (
+          photo.path &&
+          fs.existsSync(
+            photo.path
+          )
+        ) {
+          fs.unlinkSync(
+            photo.path
+          );
         }
+
       } catch {}
     }
 
     res.json({
       success: true,
-      message: "Photo से Video तैयार है!",
+
+      message:
+        "Photo से Short Video तैयार है!",
+
       video
     });
 
   } catch (error) {
 
-    console.error("PHOTO TO VIDEO ERROR:", error);
+    console.error(
+      "PHOTO TO SHORT VIDEO ERROR:",
+      error
+    );
 
-    for (const photo of photoFiles) {
+    // Uploaded photos cleanup
+    for (
+      const photo of photoFiles
+    ) {
+
       try {
-        if (photo.path && fs.existsSync(photo.path)) {
-          fs.unlinkSync(photo.path);
+
+        if (
+          photo.path &&
+          fs.existsSync(
+            photo.path
+          )
+        ) {
+          fs.unlinkSync(
+            photo.path
+          );
         }
+
       } catch {}
     }
 
-    if (outputPath) {
-      try {
-        if (fs.existsSync(outputPath)) {
-          fs.unlinkSync(outputPath);
-        }
-      } catch {}
-    }
+    // Merged temporary file cleanup
+    try {
+
+      if (
+        soundMergedPath &&
+        fs.existsSync(
+          soundMergedPath
+        )
+      ) {
+        fs.unlinkSync(
+          soundMergedPath
+        );
+      }
+
+    } catch {}
+
+    // Final output cleanup
+    try {
+
+      if (
+        outputPath &&
+        fs.existsSync(
+          outputPath
+        )
+      ) {
+        fs.unlinkSync(
+          outputPath
+        );
+      }
+
+    } catch {}
 
     res.status(500).json({
       success: false,
-      message: error.message || "Photo से Video नहीं बन पाया।"
+
+      message:
+        error.message ||
+        "Photo से Short Video नहीं बन पाया।"
     });
   }
 });
-
-
 
 /* =========================================
    VIDEOAPNA COPYRIGHT / VIDEO REPORT API

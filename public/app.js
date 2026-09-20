@@ -5865,12 +5865,18 @@ window.videoApnaSelectedSound = null;
 
       selectedSound = null;
 
+      // Long Video का global selected sound भी clear करें
+      window.videoApnaSelectedSound = null;
+      window.videoApnaPhoneSound = null;
+
       selectedBox.classList.add("hidden");
 
       selectedTitle.textContent =
         "कोई Sound नहीं चुना";
 
-      console.log("SOUND REMOVED");
+      console.log(
+        "LONG VIDEO SOUND CLEARED"
+      );
 
     });
   }
@@ -5884,9 +5890,14 @@ window.videoApnaSelectedSound = null;
 
 (function () {
 
-  const input = document.getElementById("phoneSoundInput");
-  const selectedBox = document.getElementById("selectedSound");
-  const selectedTitle = document.getElementById("selectedSoundTitle");
+  const input =
+    document.getElementById("phoneSoundInput");
+
+  const selectedBox =
+    document.getElementById("selectedSound");
+
+  const selectedTitle =
+    document.getElementById("selectedSoundTitle");
 
   if (!input) {
     console.log("PHONE SOUND: INPUT MISSING");
@@ -5895,26 +5906,36 @@ window.videoApnaSelectedSound = null;
 
   let phoneAudio = null;
 
-  input.addEventListener("change", function () {
+  input.addEventListener("change", async function () {
 
-    const file = this.files && this.files[0];
+    const file =
+      this.files && this.files[0];
 
     if (!file) return;
 
     if (!file.type.startsWith("audio/")) {
+
       alert("कृपया Audio file चुनें।");
+
       input.value = "";
+
       return;
     }
 
     if (phoneAudio) {
-      phoneAudio.pause();
+
+      try {
+        phoneAudio.pause();
+      } catch {}
+
       phoneAudio = null;
     }
 
-    const audioUrl = URL.createObjectURL(file);
+    const audioUrl =
+      URL.createObjectURL(file);
 
-    phoneAudio = new Audio(audioUrl);
+    phoneAudio =
+      new Audio(audioUrl);
 
     if (selectedBox) {
       selectedBox.classList.remove("hidden");
@@ -5922,41 +5943,495 @@ window.videoApnaSelectedSound = null;
 
     if (selectedTitle) {
       selectedTitle.textContent =
-        "📱 " + file.name;
+        "⏳ Music upload हो रहा है...";
     }
 
-    phoneAudio.addEventListener("ended", function () {
-      console.log("PHONE SOUND PREVIEW ENDED");
-    });
+    try {
 
-    phoneAudio.play()
-      .then(function () {
-        console.log(
-          "PHONE SOUND PREVIEW PLAYING:",
-          file.name
+      const formData =
+        new FormData();
+
+      formData.append(
+        "audio",
+        file
+      );
+
+      formData.append(
+        "title",
+        file.name
+      );
+
+      const response =
+        await fetch(
+          "/api/private-sound",
+          {
+            method: "POST",
+            body: formData
+          }
         );
-      })
-      .catch(function (error) {
-        console.log(
-          "PHONE SOUND PREVIEW READY:",
-          error
+
+      const result =
+        await response.json();
+
+      if (!response.ok || !result.success) {
+
+        throw new Error(
+          result.message ||
+          "Music upload नहीं हुआ।"
         );
-      });
+      }
 
-    window.videoApnaPhoneSound = {
-      file: file,
-      url: audioUrl,
-      audio: phoneAudio
-    };
+      window.videoApnaPhoneSound = {
+        file: file,
+        url: audioUrl,
+        audio: phoneAudio
+      };
 
-    console.log(
-      "PHONE SOUND SELECTED:",
-      file.name
-    );
+      window.videoApnaSelectedSound =
+        result.sound;
+
+      if (selectedTitle) {
+        selectedTitle.textContent =
+          "📱 " +
+          (result.sound.title || file.name);
+      }
+
+      console.log(
+        "PHONE SOUND UPLOADED:",
+        result.sound
+      );
+
+      phoneAudio
+        .play()
+        .then(() => {
+          console.log(
+            "PHONE SOUND PREVIEW PLAYING:",
+            file.name
+          );
+        })
+        .catch(error => {
+          console.log(
+            "PHONE SOUND PREVIEW READY:",
+            error
+          );
+        });
+
+    } catch (error) {
+
+      console.error(
+        "PHONE SOUND ERROR:",
+        error
+      );
+
+      window.videoApnaPhoneSound =
+        null;
+
+      window.videoApnaSelectedSound =
+        null;
+
+      if (selectedBox) {
+        selectedBox.classList.add("hidden");
+      }
+
+      if (selectedTitle) {
+        selectedTitle.textContent =
+          "कोई Sound नहीं चुना";
+      }
+
+      alert(
+        "❌ Phone Music upload नहीं हुआ:\n" +
+        error.message
+      );
+
+      input.value = "";
+    }
 
   });
 
 })();
+
+// ============================================================
+// LONG VIDEO MIC RECORDING
+// ============================================================
+
+(function () {
+
+  const micRecordBtn =
+    document.getElementById("micRecordBtn");
+
+  const micStatus =
+    document.getElementById("micStatus");
+
+  if (!micRecordBtn) {
+    console.log("LONG VIDEO MIC: BUTTON MISSING");
+    return;
+  }
+
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let micStream = null;
+
+  micRecordBtn.addEventListener(
+    "click",
+    async function () {
+
+      try {
+
+        // ------------------------------------------------------
+        // STOP CURRENT RECORDING
+        // ------------------------------------------------------
+
+        if (
+          mediaRecorder &&
+          mediaRecorder.state === "recording"
+        ) {
+
+          mediaRecorder.stop();
+
+          micRecordBtn.textContent =
+            "🎙️ Mic से Record";
+
+          if (micStatus) {
+            micStatus.textContent =
+              "⏳ Recording तैयार हो रही है...";
+          }
+
+          return;
+        }
+
+
+        // ------------------------------------------------------
+        // MICROPHONE SUPPORT CHECK
+        // ------------------------------------------------------
+
+        if (
+          !navigator.mediaDevices ||
+          !navigator.mediaDevices.getUserMedia
+        ) {
+
+          throw new Error(
+            "इस device/browser में Microphone उपलब्ध नहीं है।"
+          );
+
+        }
+
+
+        // ------------------------------------------------------
+        // REQUEST MICROPHONE
+        // ------------------------------------------------------
+
+        micStream =
+          await navigator.mediaDevices.getUserMedia({
+            audio: true
+          });
+
+
+        recordedChunks = [];
+
+
+        // ------------------------------------------------------
+        // SELECT RECORDING FORMAT
+        // ------------------------------------------------------
+
+        let mimeType =
+          "audio/webm";
+
+        if (
+          typeof MediaRecorder !==
+          "undefined"
+        ) {
+
+          if (
+            MediaRecorder.isTypeSupported(
+              "audio/webm;codecs=opus"
+            )
+          ) {
+
+            mimeType =
+              "audio/webm;codecs=opus";
+
+          } else if (
+            MediaRecorder.isTypeSupported(
+              "audio/webm"
+            )
+          ) {
+
+            mimeType =
+              "audio/webm";
+
+          }
+
+        }
+
+
+        // ------------------------------------------------------
+        // CREATE RECORDER
+        // ------------------------------------------------------
+
+        mediaRecorder =
+          new MediaRecorder(
+            micStream,
+            {
+              mimeType: mimeType
+            }
+          );
+
+
+        mediaRecorder.ondataavailable =
+          function (event) {
+
+            if (
+              event.data &&
+              event.data.size > 0
+            ) {
+
+              recordedChunks.push(
+                event.data
+              );
+
+            }
+
+          };
+
+
+        // ------------------------------------------------------
+        // RECORDING STOP
+        // ------------------------------------------------------
+
+        mediaRecorder.onstop =
+          async function () {
+
+            try {
+
+              if (micStream) {
+
+                micStream
+                  .getTracks()
+                  .forEach(
+                    function (track) {
+                      track.stop();
+                    }
+                  );
+
+                micStream = null;
+              }
+
+
+              const blob =
+                new Blob(
+                  recordedChunks,
+                  {
+                    type: mimeType
+                  }
+                );
+
+
+              if (!blob.size) {
+
+                throw new Error(
+                  "Recording खाली है।"
+                );
+
+              }
+
+
+              if (micStatus) {
+                micStatus.textContent =
+                  "⏳ Mic Recording upload हो रही है...";
+              }
+
+
+              const file =
+                new File(
+                  [blob],
+                  "VideoApna-Mic-" +
+                  Date.now() +
+                  ".webm",
+                  {
+                    type: mimeType
+                  }
+                );
+
+
+              // ------------------------------------------------
+              // UPLOAD TO PRIVATE SOUND
+              // ------------------------------------------------
+
+              const formData =
+                new FormData();
+
+              formData.append(
+                "audio",
+                file
+              );
+
+              formData.append(
+                "title",
+                "Mic Recording"
+              );
+
+
+              const response =
+                await fetch(
+                  "/api/private-sound",
+                  {
+                    method: "POST",
+                    body: formData
+                  }
+                );
+
+
+              const result =
+                await response.json();
+
+
+              if (
+                !response.ok ||
+                !result.success
+              ) {
+
+                throw new Error(
+                  result.message ||
+                  "Mic Recording upload नहीं हुई।"
+                );
+
+              }
+
+
+              // ------------------------------------------------
+              // SELECT SOUND FOR LONG VIDEO
+              // ------------------------------------------------
+
+              window.videoApnaSelectedSound =
+                result.sound;
+
+
+              window.videoApnaPhoneSound =
+                null;
+
+
+              const selectedBox =
+                document.getElementById(
+                  "selectedSound"
+                );
+
+              const selectedTitle =
+                document.getElementById(
+                  "selectedSoundTitle"
+                );
+
+
+              if (selectedBox) {
+                selectedBox.classList.remove(
+                  "hidden"
+                );
+              }
+
+
+              if (selectedTitle) {
+                selectedTitle.textContent =
+                  "🎙️ " +
+                  (
+                    result.sound.title ||
+                    "Mic Recording"
+                  );
+              }
+
+
+              if (micStatus) {
+                micStatus.textContent =
+                  "✅ Mic Recording तैयार है।";
+              }
+
+
+              console.log(
+                "LONG VIDEO MIC SOUND SELECTED:",
+                result.sound
+              );
+
+            } catch (error) {
+
+              console.error(
+                "LONG VIDEO MIC ERROR:",
+                error
+              );
+
+              window.videoApnaSelectedSound =
+                null;
+
+              if (micStatus) {
+                micStatus.textContent =
+                  "❌ " +
+                  error.message;
+              }
+
+            }
+
+          };
+
+
+        // ------------------------------------------------------
+        // START RECORDING
+        // ------------------------------------------------------
+
+        mediaRecorder.start();
+
+
+        micRecordBtn.textContent =
+          "⏹️ Recording रोकें";
+
+
+        if (micStatus) {
+          micStatus.textContent =
+            "🔴 Recording चल रही है... फिर बटन दबाकर रोकें।";
+        }
+
+
+        console.log(
+          "LONG VIDEO MIC RECORDING STARTED"
+        );
+
+
+      } catch (error) {
+
+        console.error(
+          "LONG VIDEO MIC START ERROR:",
+          error
+        );
+
+
+        if (micStream) {
+
+          micStream
+            .getTracks()
+            .forEach(
+              function (track) {
+                track.stop();
+              }
+            );
+
+          micStream = null;
+        }
+
+
+        if (micStatus) {
+          micStatus.textContent =
+            "❌ " +
+            error.message;
+        }
+
+
+        micRecordBtn.textContent =
+          "🎙️ Mic से Record";
+
+      }
+
+    }
+  );
+
+})();
+
+
 
 
 /* =========================================================
@@ -6146,173 +6621,1296 @@ window.videoApnaSelectedSound = null;
 ========================================================= */
 (function () {
 
-  const input = document.getElementById("photoVideoInput");
-  const countText = document.getElementById("photoCountText");
-  const previewGrid = document.getElementById("photoPreviewGrid");
-  const durationSelect = document.getElementById("photoVideoDuration");
-  const generateBtn = document.getElementById("generatePhotoVideoBtn");
-  const message = document.getElementById("photoVideoMessage");
-  const resultBox = document.getElementById("photoVideoResult");
-  const resultPlayer = document.getElementById("photoVideoResultPlayer");
+  const input =
+    document.getElementById("photoVideoInput");
+
+  const countText =
+    document.getElementById("photoCountText");
+
+  const previewGrid =
+    document.getElementById("photoPreviewGrid");
+
+  const titleInput =
+    document.getElementById("photoVideoTitle");
+
+  const descriptionInput =
+    document.getElementById(
+      "photoVideoDescription"
+    );
+
+  const durationSelect =
+    document.getElementById(
+      "photoVideoDuration"
+    );
+
+  const generateBtn =
+    document.getElementById(
+      "generatePhotoVideoBtn"
+    );
+
+  const message =
+    document.getElementById(
+      "photoVideoMessage"
+    );
+
+  const resultBox =
+    document.getElementById(
+      "photoVideoResult"
+    );
+
+  const resultPlayer =
+    document.getElementById(
+      "photoVideoResultPlayer"
+    );
+
+  const chooseSoundBtn =
+    document.getElementById(
+      "photoChooseSoundBtn"
+    );
+
+  const soundPanel =
+    document.getElementById(
+      "photoSoundPanel"
+    );
+
+  const closeSoundBtn =
+    document.getElementById(
+      "photoCloseSoundBtn"
+    );
+
+  const soundList =
+    document.getElementById(
+      "photoSoundList"
+    );
+
+  const selectedSoundBox =
+    document.getElementById(
+      "photoSelectedSound"
+    );
+
+  const selectedSoundTitle =
+    document.getElementById(
+      "photoSelectedSoundTitle"
+    );
+
+  const removeSoundBtn =
+    document.getElementById(
+      "photoRemoveSoundBtn"
+    );
+
+  const phoneSoundInput =
+    document.getElementById(
+      "photoPhoneSoundInput"
+    );
+
+  const micRecordBtn =
+    document.getElementById(
+      "photoMicRecordBtn"
+    );
+
+  const micStatus =
+    document.getElementById(
+      "photoMicStatus"
+    );
+
+  const templateInput =
+    document.getElementById(
+      "photoSelectedTemplate"
+    );
+
+  const templateButtons =
+    document.querySelectorAll(
+      ".photo-template-item"
+    );
 
   if (!input || !generateBtn) {
-    console.log("PHOTO VIDEO: ELEMENT MISSING");
+
+    console.log(
+      "PHOTO VIDEO: ELEMENT MISSING"
+    );
+
     return;
   }
 
-  console.log("VIDEOAPNA PHOTO VIDEO READY");
 
-  input.addEventListener("change", function () {
+  // ==========================================================
+  // PHOTO TEMPLATE
+  // ==========================================================
 
-    const files = Array.from(input.files || []);
+  window.videoApnaPhotoTemplate =
+    "normal";
 
-    previewGrid.innerHTML = "";
+  templateButtons.forEach(
+    function (button) {
 
-    if (!files.length) {
-      countText.textContent = "कोई फोटो नहीं चुनी गई";
-      return;
-    }
+      button.addEventListener(
+        "click",
+        function (event) {
 
-    if (files.length > 5) {
-      countText.textContent = "⚠️ अधिकतम 5 फोटो चुन सकते हैं।";
-      input.value = "";
-      return;
-    }
+          event.preventDefault();
 
-    countText.textContent =
-      "📷 " + files.length + " फोटो चुनी गई";
+          templateButtons.forEach(
+            function (item) {
+              item.classList.remove(
+                "active"
+              );
+            }
+          );
 
-    files.forEach(function (file) {
+          button.classList.add(
+            "active"
+          );
 
-      const url = URL.createObjectURL(file);
+          const template =
+            button.getAttribute(
+              "data-photo-template"
+            ) || "normal";
 
-      const img = document.createElement("img");
-      img.src = url;
-      img.alt = file.name;
+          window.videoApnaPhotoTemplate =
+            template;
 
-      previewGrid.appendChild(img);
+          if (templateInput) {
+            templateInput.value =
+              template;
+          }
 
-    });
-
-  });
-
-
-  generateBtn.addEventListener("click", async function () {
-
-    const files = Array.from(input.files || []);
-
-    if (!files.length) {
-      message.textContent = "⚠️ पहले 1 से 5 फोटो चुनें।";
-      return;
-    }
-
-    if (files.length > 5) {
-      message.textContent = "⚠️ अधिकतम 5 फोटो चुन सकते हैं।";
-      return;
-    }
-
-    const duration =
-      Number(durationSelect.value || 10);
-
-    const template =
-      window.videoApnaSelectedTemplate || "normal";
-
-    generateBtn.disabled = true;
-
-    message.textContent =
-      "⏳ फोटो से वीडियो बनाया जा रहा है...";
-
-    resultBox.classList.add("hidden");
-
-    try {
-
-      const formData = new FormData();
-
-      files.forEach(function (file) {
-        formData.append("photos", file);
-      });
-
-      formData.append(
-        "duration",
-        String(duration)
-      );
-
-      formData.append(
-        "template",
-        template
-      );
-
-      console.log("PHOTO VIDEO REQUEST:", {
-        photos: files.length,
-        duration: duration,
-        template: template
-      });
-
-      const response = await fetch(
-        "/api/photo-to-video",
-        {
-          method: "POST",
-          body: formData
+          console.log(
+            "PHOTO TEMPLATE:",
+            template
+          );
         }
       );
 
-      const result = await response.json();
+    }
+  );
 
-      if (!response.ok || !result.success) {
-        throw new Error(
-          result.message ||
-          "Photo से Video नहीं बन पाया।"
+
+  // ==========================================================
+  // PHOTO PREVIEW
+  // ==========================================================
+
+  input.addEventListener(
+    "change",
+    function () {
+
+      const files =
+        Array.from(
+          input.files || []
         );
+
+      if (previewGrid) {
+        previewGrid.innerHTML = "";
       }
 
-      console.log(
-        "PHOTO VIDEO CREATED:",
-        result.video
+      if (!files.length) {
+
+        if (countText) {
+          countText.textContent =
+            "कोई फोटो नहीं चुनी गई";
+        }
+
+        return;
+      }
+
+      if (files.length > 5) {
+
+        if (countText) {
+          countText.textContent =
+            "⚠️ अधिकतम 5 फोटो चुन सकते हैं।";
+        }
+
+        input.value = "";
+
+        return;
+      }
+
+      if (countText) {
+
+        countText.textContent =
+          "📷 " +
+          files.length +
+          " फोटो चुनी गई";
+      }
+
+      files.forEach(
+        function (file) {
+
+          const url =
+            URL.createObjectURL(file);
+
+          const img =
+            document.createElement("img");
+
+          img.src = url;
+
+          img.alt =
+            file.name;
+
+          img.onload =
+            function () {
+              URL.revokeObjectURL(url);
+            };
+
+          if (previewGrid) {
+            previewGrid.appendChild(img);
+          }
+
+        }
       );
 
-      if (result.video && result.video.url) {
+    }
+  );
 
-        resultPlayer.src =
-          result.video.url +
-          "?v=" +
-          Date.now();
 
-        resultPlayer.load();
+  // ==========================================================
+  // PUBLIC MUSIC
+  // ==========================================================
 
-        resultBox.classList.remove("hidden");
+  async function loadPhotoPublicMusic() {
 
-        message.textContent =
-          "✅ आपका Video तैयार है!";
+    if (!soundList) return;
 
-      } else {
+    soundList.innerHTML =
+      "<p>🎵 Music load हो रहा है...</p>";
 
-        throw new Error(
-          "Video तैयार हुआ लेकिन URL नहीं मिला।"
+    try {
+
+      const response =
+        await fetch(
+          "/api/sounds"
         );
 
+      if (!response.ok) {
+        throw new Error(
+          "Sounds API failed"
+        );
       }
+
+      const sounds =
+        await response.json();
+
+      if (
+        !Array.isArray(sounds) ||
+        sounds.length === 0
+      ) {
+
+        soundList.innerHTML =
+          "<p>अभी Public Music उपलब्ध नहीं है।</p>";
+
+        return;
+      }
+
+      soundList.innerHTML = "";
+
+      sounds.forEach(
+        function (sound) {
+
+          const item =
+            document.createElement(
+              "div"
+            );
+
+          item.className =
+            "sound-item";
+
+          const info =
+            document.createElement(
+              "div"
+            );
+
+          info.className =
+            "sound-item-info";
+
+          const strong =
+            document.createElement(
+              "strong"
+            );
+
+          strong.textContent =
+            sound.title ||
+            "Original Sound";
+
+          const small =
+            document.createElement(
+              "small"
+            );
+
+          small.textContent =
+            sound.channel ||
+            "VideoApna";
+
+          info.appendChild(strong);
+          info.appendChild(small);
+
+
+          const actions =
+            document.createElement(
+              "div"
+            );
+
+          actions.className =
+            "sound-item-actions";
+
+
+          const previewBtn =
+            document.createElement(
+              "button"
+            );
+
+          previewBtn.type =
+            "button";
+
+          previewBtn.className =
+            "sound-preview-btn";
+
+          previewBtn.textContent =
+            "▶";
+
+
+          const useBtn =
+            document.createElement(
+              "button"
+            );
+
+          useBtn.type =
+            "button";
+
+          useBtn.className =
+            "use-sound-btn";
+
+          useBtn.textContent =
+            "Use Sound";
+
+
+          actions.appendChild(
+            previewBtn
+          );
+
+          actions.appendChild(
+            useBtn
+          );
+
+
+          item.appendChild(info);
+          item.appendChild(actions);
+
+          soundList.appendChild(item);
+
+
+          let audio = null;
+
+
+          previewBtn.addEventListener(
+            "click",
+            function (event) {
+
+              event.preventDefault();
+              event.stopPropagation();
+
+              if (audio) {
+
+                audio.pause();
+                audio.currentTime = 0;
+                audio = null;
+
+                previewBtn.textContent =
+                  "▶";
+
+                return;
+              }
+
+              audio =
+                new Audio(
+                  sound.url
+                );
+
+              audio.play()
+                .then(
+                  function () {
+                    previewBtn.textContent =
+                      "⏸";
+                  }
+                )
+                .catch(
+                  function (error) {
+                    console.log(
+                      "PHOTO SOUND PREVIEW ERROR:",
+                      error
+                    );
+                  }
+                );
+
+              audio.addEventListener(
+                "ended",
+                function () {
+
+                  previewBtn.textContent =
+                    "▶";
+
+                  audio = null;
+
+                }
+              );
+
+            }
+          );
+
+
+          useBtn.addEventListener(
+            "click",
+            function (event) {
+
+              event.preventDefault();
+              event.stopPropagation();
+
+              window.videoApnaPhotoSound =
+                sound;
+
+              window.videoApnaSelectedSound =
+                sound;
+
+              if (selectedSoundTitle) {
+                selectedSoundTitle.textContent =
+                  "🎵 " +
+                  (
+                    sound.title ||
+                    "Original Sound"
+                  );
+              }
+
+              if (selectedSoundBox) {
+                selectedSoundBox.classList.remove(
+                  "hidden"
+                );
+              }
+
+              if (soundPanel) {
+                soundPanel.classList.add(
+                  "hidden"
+                );
+              }
+
+              console.log(
+                "PHOTO PUBLIC SOUND SELECTED:",
+                sound
+              );
+
+            }
+          );
+
+        }
+      );
 
     } catch (error) {
 
       console.error(
-        "PHOTO VIDEO ERROR:",
+        "PHOTO PUBLIC MUSIC ERROR:",
         error
       );
 
-      message.textContent =
-        "❌ " +
-        (error.message ||
-          "Photo से Video नहीं बन पाया।");
-
-    } finally {
-
-      generateBtn.disabled = false;
-
+      soundList.innerHTML =
+        "<p>❌ Music load नहीं हुआ।</p>";
     }
 
-  });
+  }
+
+
+  if (chooseSoundBtn) {
+
+    chooseSoundBtn.addEventListener(
+      "click",
+      async function () {
+
+        if (soundPanel) {
+          soundPanel.classList.remove(
+            "hidden"
+          );
+        }
+
+        await loadPhotoPublicMusic();
+
+      }
+    );
+
+  }
+
+
+  if (closeSoundBtn) {
+
+    closeSoundBtn.addEventListener(
+      "click",
+      function () {
+
+        if (soundPanel) {
+          soundPanel.classList.add(
+            "hidden"
+          );
+        }
+
+      }
+    );
+
+  }
+
+
+  // ==========================================================
+  // PHOTO PHONE MUSIC
+  // ==========================================================
+
+  if (phoneSoundInput) {
+
+    phoneSoundInput.addEventListener(
+      "change",
+      async function () {
+
+        const file =
+          phoneSoundInput.files &&
+          phoneSoundInput.files[0];
+
+        if (!file) return;
+
+        if (!file.type.startsWith("audio/")) {
+
+          alert(
+            "कृपया Audio file चुनें।"
+          );
+
+          phoneSoundInput.value = "";
+
+          return;
+        }
+
+        if (selectedSoundTitle) {
+          selectedSoundTitle.textContent =
+            "⏳ Phone Music upload हो रहा है...";
+        }
+
+        if (selectedSoundBox) {
+          selectedSoundBox.classList.remove(
+            "hidden"
+          );
+        }
+
+        try {
+
+          const formData =
+            new FormData();
+
+          formData.append(
+            "audio",
+            file
+          );
+
+          formData.append(
+            "title",
+            file.name
+          );
+
+          const response =
+            await fetch(
+              "/api/private-sound",
+              {
+                method: "POST",
+                body: formData
+              }
+            );
+
+          const result =
+            await response.json();
+
+          if (
+            !response.ok ||
+            !result.success
+          ) {
+
+            throw new Error(
+              result.message ||
+              "Phone Music upload नहीं हुआ।"
+            );
+          }
+
+          window.videoApnaPhotoSound =
+            result.sound;
+
+          window.videoApnaSelectedSound =
+            result.sound;
+
+          if (selectedSoundTitle) {
+            selectedSoundTitle.textContent =
+              "📱 " +
+              (
+                result.sound.title ||
+                file.name
+              );
+          }
+
+          console.log(
+            "PHOTO PHONE SOUND UPLOADED:",
+            result.sound
+          );
+
+        } catch (error) {
+
+          console.error(
+            "PHOTO PHONE SOUND ERROR:",
+            error
+          );
+
+          window.videoApnaPhotoSound =
+            null;
+
+          window.videoApnaSelectedSound =
+            null;
+
+          if (selectedSoundBox) {
+            selectedSoundBox.classList.add(
+              "hidden"
+            );
+          }
+
+          alert(
+            "❌ Phone Music upload नहीं हुआ:\n" +
+            error.message
+          );
+
+          phoneSoundInput.value = "";
+        }
+
+      }
+    );
+
+  }
+
+
+  // ==========================================================
+  // PHOTO MICROPHONE
+  // ==========================================================
+
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let micStream = null;
+
+  if (micRecordBtn) {
+
+    micRecordBtn.addEventListener(
+      "click",
+      async function () {
+
+        try {
+
+          if (
+            mediaRecorder &&
+            mediaRecorder.state === "recording"
+          ) {
+
+            mediaRecorder.stop();
+
+            micRecordBtn.textContent =
+              "🎙️ Mic से Record";
+
+            if (micStatus) {
+              micStatus.textContent =
+                "⏳ Recording तैयार हो रही है...";
+            }
+
+            return;
+          }
+
+
+          if (
+            !navigator.mediaDevices ||
+            !navigator.mediaDevices.getUserMedia
+          ) {
+
+            throw new Error(
+              "इस device/browser में Microphone उपलब्ध नहीं है।"
+            );
+          }
+
+
+          micStream =
+            await navigator.mediaDevices.getUserMedia(
+              {
+                audio: true
+              }
+            );
+
+
+          recordedChunks = [];
+
+
+          let mimeType =
+            "audio/webm";
+
+          if (
+            typeof MediaRecorder !==
+            "undefined"
+          ) {
+
+            if (
+              MediaRecorder.isTypeSupported(
+                "audio/webm;codecs=opus"
+              )
+            ) {
+
+              mimeType =
+                "audio/webm;codecs=opus";
+
+            } else if (
+              MediaRecorder.isTypeSupported(
+                "audio/webm"
+              )
+            ) {
+
+              mimeType =
+                "audio/webm";
+            }
+
+          }
+
+
+          mediaRecorder =
+            new MediaRecorder(
+              micStream,
+              {
+                mimeType:
+                  mimeType
+              }
+            );
+
+
+          mediaRecorder.ondataavailable =
+            function (event) {
+
+              if (
+                event.data &&
+                event.data.size > 0
+              ) {
+
+                recordedChunks.push(
+                  event.data
+                );
+
+              }
+
+            };
+
+
+          mediaRecorder.onstop =
+            async function () {
+
+              try {
+
+                if (micStream) {
+
+                  micStream
+                    .getTracks()
+                    .forEach(
+                      function (track) {
+                        track.stop();
+                      }
+                    );
+
+                  micStream = null;
+                }
+
+
+                const blob =
+                  new Blob(
+                    recordedChunks,
+                    {
+                      type:
+                        mimeType
+                    }
+                  );
+
+
+                if (!blob.size) {
+
+                  throw new Error(
+                    "Recording खाली है।"
+                  );
+                }
+
+
+                if (micStatus) {
+                  micStatus.textContent =
+                    "⏳ Recording upload हो रही है...";
+                }
+
+
+                if (selectedSoundBox) {
+                  selectedSoundBox.classList.remove(
+                    "hidden"
+                  );
+                }
+
+
+                const formData =
+                  new FormData();
+
+
+                const file =
+                  new File(
+                    [blob],
+                    "VideoApna-Mic-" +
+                    Date.now() +
+                    ".webm",
+                    {
+                      type:
+                        mimeType
+                    }
+                  );
+
+
+                formData.append(
+                  "audio",
+                  file
+                );
+
+                formData.append(
+                  "title",
+                  "Mic Recording"
+                );
+
+
+                const response =
+                  await fetch(
+                    "/api/private-sound",
+                    {
+                      method: "POST",
+                      body: formData
+                    }
+                  );
+
+
+                const result =
+                  await response.json();
+
+
+                if (
+                  !response.ok ||
+                  !result.success
+                ) {
+
+                  throw new Error(
+                    result.message ||
+                    "Mic Recording upload नहीं हुई।"
+                  );
+                }
+
+
+                window.videoApnaPhotoSound =
+                  result.sound;
+
+                window.videoApnaSelectedSound =
+                  result.sound;
+
+
+                if (selectedSoundTitle) {
+
+                  selectedSoundTitle.textContent =
+                    "🎙️ " +
+                    (
+                      result.sound.title ||
+                      "Mic Recording"
+                    );
+
+                }
+
+
+                if (micStatus) {
+
+                  micStatus.textContent =
+                    "✅ Mic Recording तैयार है।";
+
+                }
+
+
+                console.log(
+                  "PHOTO MIC SOUND UPLOADED:",
+                  result.sound
+                );
+
+
+              } catch (error) {
+
+                console.error(
+                  "PHOTO MIC ERROR:",
+                  error
+                );
+
+                window.videoApnaPhotoSound =
+                  null;
+
+                window.videoApnaSelectedSound =
+                  null;
+
+                if (selectedSoundBox) {
+                  selectedSoundBox.classList.add(
+                    "hidden"
+                  );
+                }
+
+                if (micStatus) {
+                  micStatus.textContent =
+                    "❌ " +
+                    error.message;
+                }
+
+              }
+
+            };
+
+
+          mediaRecorder.start();
+
+
+          micRecordBtn.textContent =
+            "⏹️ Recording रोकें";
+
+
+          if (micStatus) {
+            micStatus.textContent =
+              "🔴 Recording चल रही है... फिर बटन दबाकर रोकें।";
+          }
+
+
+        } catch (error) {
+
+          console.error(
+            "MIC START ERROR:",
+            error
+          );
+
+          if (micStream) {
+
+            micStream
+              .getTracks()
+              .forEach(
+                function (track) {
+                  track.stop();
+                }
+              );
+
+            micStream = null;
+          }
+
+          if (micStatus) {
+            micStatus.textContent =
+              "❌ " +
+              error.message;
+          }
+
+        }
+
+      }
+    );
+
+  }
+
+
+  // ==========================================================
+  // REMOVE SELECTED PHOTO MUSIC
+  // ==========================================================
+
+  if (removeSoundBtn) {
+
+    removeSoundBtn.addEventListener(
+      "click",
+      function () {
+
+        window.videoApnaPhotoSound =
+          null;
+
+        window.videoApnaSelectedSound =
+          null;
+
+        if (selectedSoundBox) {
+          selectedSoundBox.classList.add(
+            "hidden"
+          );
+        }
+
+        if (selectedSoundTitle) {
+          selectedSoundTitle.textContent =
+            "कोई Music नहीं चुना";
+        }
+
+        if (phoneSoundInput) {
+          phoneSoundInput.value = "";
+        }
+
+        if (micStatus) {
+          micStatus.textContent = "";
+        }
+
+      }
+    );
+
+  }
+
+
+  // ==========================================================
+  // GENERATE PHOTO SHORT
+  // ==========================================================
+
+  generateBtn.addEventListener(
+    "click",
+    async function (event) {
+
+      event.preventDefault();
+      event.stopPropagation();
+
+
+      const files =
+        Array.from(
+          input.files || []
+        );
+
+
+      if (!files.length) {
+
+        message.textContent =
+          "⚠️ पहले 1 से 5 फोटो चुनें।";
+
+        return;
+      }
+
+
+      if (files.length > 5) {
+
+        message.textContent =
+          "⚠️ अधिकतम 5 फोटो चुन सकते हैं।";
+
+        return;
+      }
+
+
+      const title =
+        titleInput
+          ? titleInput.value.trim()
+          : "";
+
+
+      if (!title) {
+
+        message.textContent =
+          "⚠️ Photo Short का Title लिखें।";
+
+        if (titleInput) {
+          titleInput.focus();
+        }
+
+        return;
+      }
+
+
+      const description =
+        descriptionInput
+          ? descriptionInput.value.trim()
+          : "";
+
+
+      const duration =
+        Number(
+          durationSelect
+            ? durationSelect.value
+            : 10
+        );
+
+
+      const template =
+        window.videoApnaPhotoTemplate ||
+        (
+          templateInput
+            ? templateInput.value
+            : "normal"
+        ) ||
+        "normal";
+
+
+      const selectedSound =
+        window.videoApnaSelectedSound ||
+        window.videoApnaPhotoSound ||
+        null;
+
+
+      generateBtn.disabled = true;
+
+
+      message.textContent =
+        "⏳ Photo Short बनाया जा रहा है...";
+
+
+      if (resultBox) {
+        resultBox.classList.add(
+          "hidden"
+        );
+      }
+
+
+      try {
+
+        const formData =
+          new FormData();
+
+
+        files.forEach(
+          function (file) {
+
+            formData.append(
+              "photos",
+              file
+            );
+
+          }
+        );
+
+
+        formData.append(
+          "title",
+          title
+        );
+
+
+        formData.append(
+          "description",
+          description
+        );
+
+
+        formData.append(
+          "duration",
+          String(duration)
+        );
+
+
+        formData.append(
+          "template",
+          template
+        );
+
+
+        if (selectedSound) {
+
+          formData.append(
+            "soundId",
+            String(
+              selectedSound.id ||
+              ""
+            )
+          );
+
+        }
+
+
+        console.log(
+          "PHOTO VIDEO REQUEST:",
+          {
+            photos:
+              files.length,
+
+            title:
+              title,
+
+            duration:
+              duration,
+
+            template:
+              template,
+
+            soundId:
+              selectedSound
+                ? selectedSound.id
+                : null
+          }
+        );
+
+
+        const response =
+          await fetch(
+            "/api/photo-to-video",
+            {
+              method: "POST",
+              body: formData
+            }
+          );
+
+
+        const result =
+          await response.json();
+
+
+        if (
+          !response.ok ||
+          !result.success
+        ) {
+
+          throw new Error(
+            result.message ||
+            "Photo Short नहीं बना।"
+          );
+
+        }
+
+
+        message.textContent =
+          "✅ Photo से Short Video तैयार है!";
+
+
+        if (
+          result.video &&
+          result.video.url &&
+          resultBox &&
+          resultPlayer
+        ) {
+
+          resultPlayer.src =
+            result.video.url;
+
+          resultBox.classList.remove(
+            "hidden"
+          );
+
+          try {
+            await resultPlayer.play();
+          } catch {}
+
+        }
+
+
+        console.log(
+          "PHOTO VIDEO SUCCESS:",
+          result
+        );
+
+
+      } catch (error) {
+
+        console.error(
+          "PHOTO VIDEO ERROR:",
+          error
+        );
+
+        message.textContent =
+          "❌ Photo Short नहीं बना: " +
+          error.message;
+
+
+      } finally {
+
+        generateBtn.disabled =
+          false;
+
+      }
+
+    }
+  );
+
 
 })();
+
 
 
 

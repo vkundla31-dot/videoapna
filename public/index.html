@@ -405,13 +405,29 @@
 <div id="photoVideoMode" class="photo-video-mode">
 
   <div class="photo-video-title">
-    📷 फोटो से Automatic Video
+    📷 फोटो से Automatic Short Video
   </div>
 
   <p class="photo-video-help">
-    1 से 5 फोटो चुनें और VideoApna अपने आप वीडियो बनाएगा।
+    1 से 5 फोटो चुनें और VideoApna अपने आप Short Video बनाएगा।
   </p>
 
+  <!-- PHOTO SHORT TITLE -->
+  <input
+    id="photoVideoTitle"
+    class="upload-input"
+    type="text"
+    placeholder="Photo Short का Title *"
+    maxlength="150">
+
+  <!-- PHOTO SHORT DESCRIPTION -->
+  <textarea
+    id="photoVideoDescription"
+    class="upload-input upload-textarea"
+    placeholder="Description लिखें (Optional)"
+    maxlength="2000"></textarea>
+
+  <!-- PHOTO SELECT -->
   <label class="file-label photo-select-label">
     📸 फोटो चुनें
     <input
@@ -426,39 +442,220 @@
     कोई फोटो नहीं चुनी गई
   </div>
 
-  <div id="photoPreviewGrid" class="photo-preview-grid"></div>
+  <div
+    id="photoPreviewGrid"
+    class="photo-preview-grid">
+  </div>
 
+  <!-- PHOTO SHORT OPTIONS -->
   <div class="photo-video-options">
 
     <div class="photo-option-group">
-      <label>⏱️ वीडियो की लंबाई</label>
-      <select id="photoVideoDuration" class="upload-input">
-        <option value="10">10 सेकंड</option>
-        <option value="15">15 सेकंड</option>
-        <option value="20">20 सेकंड</option>
+
+      <label>
+        ⏱️ Short की लंबाई
+      </label>
+
+      <select
+        id="photoVideoDuration"
+        class="upload-input">
+
+        <option value="10">
+          10 सेकंड
+        </option>
+
+        <option value="15">
+          15 सेकंड
+        </option>
+
+        <option value="20">
+          20 सेकंड
+        </option>
+
       </select>
+
     </div>
 
   </div>
 
+  <!-- PHOTO SHORT TEMPLATE -->
+  <div
+    id="photoTemplatePicker"
+    class="template-picker">
+
+    <div class="template-title">
+      🎨 Short Template
+    </div>
+
+    <div class="template-list">
+
+      <button
+        type="button"
+        class="template-item photo-template-item active"
+        data-photo-template="normal">
+        🎬 Normal
+      </button>
+
+      <button
+        type="button"
+        class="template-item photo-template-item"
+        data-photo-template="cinematic">
+        🎞️ Cinematic
+      </button>
+
+      <button
+        type="button"
+        class="template-item photo-template-item"
+        data-photo-template="bright">
+        ☀️ Bright
+      </button>
+
+      <button
+        type="button"
+        class="template-item photo-template-item"
+        data-photo-template="vintage">
+        📼 Vintage
+      </button>
+
+      <button
+        type="button"
+        class="template-item photo-template-item"
+        data-photo-template="cool">
+        ❄️ Cool
+      </button>
+
+    </div>
+
+    <input
+      type="hidden"
+      id="photoSelectedTemplate"
+      value="normal">
+
+  </div>
+
+  <!-- PHOTO SHORT MUSIC -->
+  <div
+    id="photoSoundPicker"
+    class="sound-picker">
+
+    <div class="template-title">
+      🎵 Music
+    </div>
+
+    <!-- PUBLIC MUSIC -->
+    <button
+      type="button"
+      id="photoChooseSoundBtn"
+      class="sound-picker-btn">
+      🎵 Public Music
+    </button>
+
+    <!-- PHONE MUSIC -->
+    <label
+      for="photoPhoneSoundInput"
+      class="sound-picker-btn phone-sound-btn">
+      📱 Phone Music
+    </label>
+
+    <input
+      id="photoPhoneSoundInput"
+      type="file"
+      accept="audio/*"
+      hidden>
+
+    <!-- MICROPHONE -->
+    <button
+      type="button"
+      id="photoMicRecordBtn"
+      class="sound-picker-btn">
+      🎙️ Mic से Record
+    </button>
+
+    <div
+      id="photoMicStatus"
+      class="photo-mic-status">
+    </div>
+
+    <!-- SELECTED MUSIC -->
+    <div
+      id="photoSelectedSound"
+      class="selected-sound hidden">
+
+      <span id="photoSelectedSoundTitle">
+        कोई Music नहीं चुना
+      </span>
+
+      <button
+        type="button"
+        id="photoRemoveSoundBtn">
+        ✕
+      </button>
+
+    </div>
+
+    <!-- PUBLIC MUSIC PANEL -->
+    <div
+      id="photoSoundPanel"
+      class="sound-panel hidden">
+
+      <div class="sound-panel-header">
+
+        <strong>
+          🎵 Public Music
+        </strong>
+
+        <button
+          type="button"
+          id="photoCloseSoundBtn">
+          ✕
+        </button>
+
+      </div>
+
+      <div
+        id="photoSoundList"
+        class="sound-list">
+
+        <p>
+          🎵 Music load हो रहा है...
+        </p>
+
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- PHOTO SHORT BUTTON -->
   <button
     type="button"
     id="generatePhotoVideoBtn"
     class="publish-btn">
-    🎬 Photo से Video बनाएं
+
+    🎬 Photo से Short Video बनाएं
+
   </button>
 
-  <p id="photoVideoMessage" class="upload-message"></p>
+  <p
+    id="photoVideoMessage"
+    class="upload-message">
+  </p>
 
-  <div id="photoVideoResult" class="photo-video-result hidden">
+  <!-- RESULT -->
+  <div
+    id="photoVideoResult"
+    class="photo-video-result hidden">
+
     <video
       id="photoVideoResultPlayer"
       controls
       playsinline>
     </video>
+
   </div>
 
 </div>
+
 
 
     <div class="upload-header">
@@ -565,6 +762,18 @@
         type="file"
         accept="audio/*"
         hidden>
+
+    <button
+      type="button"
+      id="micRecordBtn"
+      class="sound-picker-btn">
+      🎙️ Mic से Record
+    </button>
+
+    <div
+      id="micStatus"
+      class="photo-mic-status">
+    </div>
 
       <div id="selectedSound" class="selected-sound hidden">
         <span id="selectedSoundTitle">कोई Sound नहीं चुना</span>
