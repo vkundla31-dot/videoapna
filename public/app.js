@@ -1353,7 +1353,20 @@ function normalizeVideoApnaVideo(video) {
       video.thumbnail ||
       "https://dummyimage.com/640x360/111/fff.png&text=VideoApna",
     url: video.url || "",
-    embedUrl: "",
+    embedUrl:
+      video.embedUrl ||
+      video.vcdnEmbedUrl ||
+      "",
+    vcdnEmbedUrl:
+      video.vcdnEmbedUrl ||
+      video.embedUrl ||
+      "",
+    vcdnPlaybackUrl:
+      video.vcdnPlaybackUrl ||
+      "",
+    vcdnVideoId:
+      video.vcdnVideoId ||
+      "",
     views: video.views || "0 views",
     viewCount: Number(video.viewCount || 0),
     likes: Number(video.likes || 0),
