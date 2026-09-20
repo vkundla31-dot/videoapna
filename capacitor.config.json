@@ -1,5 +1,9 @@
 {
   "appId": "com.videoapna.app",
   "appName": "VideoApna",
-  "webDir": "public"
+  "webDir": "public",
+  "server": {
+    "url": "https://videoapna.onrender.com",
+    "cleartext": false
+  }
 }
