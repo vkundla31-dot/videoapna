@@ -218,10 +218,18 @@
       <img id="profilePhoto" alt="Profile Photo">
     </div>
 
-    <label class="profile-photo-btn">
+    <button
+      type="button"
+      id="profilePhotoButton"
+      class="profile-photo-btn">
       📷 फोटो बदलें
-      <input id="profilePhotoInput" type="file" accept="image/*" hidden>
-    </label>
+    </button>
+
+    <input
+      id="profilePhotoInput"
+      type="file"
+      accept="image/*"
+      hidden>
 
     <input
       id="profileNameInput"
@@ -398,6 +406,212 @@
 
 
 
+
+<!-- VIDEOAPNA REMIX CREATOR -->
+<div id="videoApnaRemixCreator" class="modal hidden">
+  <div class="upload-box remix-creator-box">
+
+    <div class="upload-header">
+      <h2 id="remixCreatorTitle">🎬 Remix</h2>
+      <button type="button" id="closeRemixCreator">✕</button>
+    </div>
+
+    <!-- MUSIC REMIX -->
+    <div id="musicRemixCreator" class="remix-creator-mode hidden">
+
+      <div class="remix-source-card">
+        <div class="remix-source-title">🎵 VideoApna Sound</div>
+        <div id="musicRemixSourceTitle" class="remix-source-name">
+          Sound loading...
+        </div>
+        <div class="remix-source-lock">
+          🔒 यह Sound इस Remix के लिए locked है
+        </div>
+      </div>
+
+      <input
+        id="musicRemixTitle"
+        class="upload-input"
+        type="text"
+        placeholder="अपने Remix Short का Title *"
+        maxlength="150">
+
+      <textarea
+        id="musicRemixDescription"
+        class="upload-input upload-textarea"
+        placeholder="Description लिखें (Optional)"
+        maxlength="2000"></textarea>
+
+      <div class="remix-section-title">
+        📹 अपना Video / Photos
+      </div>
+
+      <button
+        type="button"
+        id="musicRemixVideoButton"
+        class="file-label">
+        🎬 Gallery से Video चुनें
+      </button>
+
+      <input
+        id="musicRemixVideoInput"
+        type="file"
+        accept="video/*"
+        hidden>
+
+      <button
+        type="button"
+        id="musicRemixPhotoButton"
+        class="file-label">
+        📸 Gallery से Photos चुनें
+      </button>
+
+      <input
+        id="musicRemixPhotoInput"
+        type="file"
+        accept="image/*"
+        multiple
+        hidden>
+
+      <button
+        type="button"
+        id="musicRemixCameraButton"
+        class="file-label">
+        📷 Camera से Video
+      </button>
+
+      <input
+        id="musicRemixCameraInput"
+        type="file"
+        accept="video/*"
+        capture="user"
+        hidden>
+
+      <div id="musicRemixMediaStatus" class="upload-message"></div>
+
+      <div class="remix-volume-row">
+        <label>
+          🔊 Original Audio
+          <input
+            id="musicRemixOriginalVolume"
+            type="range"
+            min="0"
+            max="100"
+            value="0">
+        </label>
+
+        <label>
+          🎵 Remix Sound
+          <input
+            id="musicRemixSoundVolume"
+            type="range"
+            min="0"
+            max="100"
+            value="100">
+        </label>
+      </div>
+
+      <button
+        type="button"
+        id="musicRemixPublishButton"
+        class="publish-btn">
+        🚀 Music Remix बनाएं
+      </button>
+
+      <p id="musicRemixMessage" class="upload-message"></p>
+    </div>
+
+    <!-- COLLAB REMIX -->
+    <div id="collabRemixCreator" class="remix-creator-mode hidden">
+
+      <div class="remix-section-title">
+        🤝 Collab Short
+      </div>
+
+      <div class="collab-preview">
+        <div class="collab-source">
+          <div class="collab-label">Original Short</div>
+          <div id="collabSourcePlayer" class="collab-source-player"></div>
+        </div>
+
+        <div class="collab-camera">
+          <div class="collab-label">आपका Camera</div>
+          <video
+            id="collabCameraPreview"
+            autoplay
+            muted
+            playsinline></video>
+        </div>
+      </div>
+
+      <div class="collab-controls">
+
+        <button
+          type="button"
+          id="collabStartCameraButton"
+          class="file-label">
+          📷 Camera शुरू करें
+        </button>
+
+        <button
+          type="button"
+          id="collabFlipCameraButton"
+          class="file-label">
+          🔄 Camera Flip
+        </button>
+
+        <button
+          type="button"
+          id="collabRecordButton"
+          class="publish-btn">
+          🔴 Recording शुरू करें
+        </button>
+
+      </div>
+
+      <div class="remix-volume-row">
+        <label>
+          🔊 Original Short
+          <input
+            id="collabOriginalVolume"
+            type="range"
+            min="0"
+            max="100"
+            value="100">
+        </label>
+
+        <label>
+          🎙️ आपका Mic
+          <input
+            id="collabMicVolume"
+            type="range"
+            min="0"
+            max="100"
+            value="100">
+        </label>
+      </div>
+
+      <div id="collabRecordingStatus" class="upload-message"></div>
+
+      <video
+        id="collabRecordedPreview"
+        class="hidden"
+        controls
+        playsinline></video>
+
+      <button
+        type="button"
+        id="collabPublishButton"
+        class="publish-btn hidden">
+        🚀 Collab Short Publish करें
+      </button>
+
+      <p id="collabMessage" class="upload-message"></p>
+    </div>
+
+  </div>
+</div>
+
 <div id="uploadModal" class="modal hidden">
   <div class="upload-box">
 
@@ -455,15 +669,19 @@
     maxlength="2000"></textarea>
 
   <!-- PHOTO SELECT -->
-  <label class="file-label photo-select-label">
+  <button
+    type="button"
+    id="photoSelectButton"
+    class="file-label photo-select-label">
     📸 फोटो चुनें
-    <input
-      id="photoVideoInput"
-      type="file"
-      accept="image/*"
-      multiple
-      hidden>
-  </label>
+  </button>
+
+  <input
+    id="photoVideoInput"
+    type="file"
+    accept="image/*"
+    multiple
+    hidden>
 
   <div id="photoCountText" class="photo-count-text">
     कोई फोटो नहीं चुनी गई
@@ -690,9 +908,14 @@
       <button id="closeUpload">✕</button>
     </div>
 
-    <label class="file-label">
+    <button
+      type="button"
+      id="videoSelectButton"
+      class="file-label">
       🎬 वीडियो चुनें
-      <input id="videoFile" type="file" accept="video/*" onchange="
+    </button>
+
+    <input id="videoFile" type="file" accept="video/*" hidden onchange="
   const f=this.files[0];
   if(f){
     const p=document.getElementById('previewPlayer');

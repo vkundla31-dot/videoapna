@@ -2496,3 +2496,17 @@ body.shorts-mode .bottom-nav {
   color: #fff;
   border-color: #111;
 }
+
+
+/* VIDEOAPNA REMIX CREATOR LAYER FIX */
+#videoApnaRemixCreator {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 1000001 !important;
+  pointer-events: auto !important;
+}
+
+#videoApnaRemixCreator .remix-creator-box {
+  position: relative !important;
+  z-index: 1000002 !important;
+}

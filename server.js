@@ -1974,6 +1974,9 @@ app.post("/api/upload", upload.single("video"), async (req, res) => {
       ownerUserId: userId,
       visibility: "public",
 
+      // यह /api/upload वाला सामान्य Long Video है।
+      contentType: "long",
+
       title,
 
       description:
@@ -2760,6 +2763,13 @@ app.post("/api/photo-to-video", photoUpload.array("photos", 5), async (req, res)
 
       visibility:
         "public",
+
+      // Photo से बना VideoApna Short
+      contentType: "short",
+
+      // Creator बाद में Remix permission बंद कर सकता है।
+      remixAllowed:
+        String(req.body.remixAllowed || "true").toLowerCase() !== "false",
 
       title:
         photoVideoTitle,
@@ -5584,6 +5594,1570 @@ app.get("/api/youtube-search", (req, res) => {
     });
   }
 });
+
+
+// ============================================================
+// VIDEOAPNA SHORT MUSIC REMIX
+// केवल VideoApna Shorts के लिए
+// Long Video इस endpoint में स्वीकार नहीं होगा।
+// ============================================================
+
+const remixUploadStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, UPLOADS);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".mp4";
+    const name =
+      Date.now() +
+      "-remix-" +
+      Math.random().toString(36).slice(2, 8) +
+      ext;
+    cb(null, name);
+  }
+});
+
+const remixUpload = multer({
+  storage: remixUploadStorage,
+  limits: {
+    fileSize: 500 * 1024 * 1024,
+    files: 6
+  },
+  fileFilter: (req, file, cb) => {
+    if (
+      file.fieldname === "video" &&
+      file.mimetype &&
+      file.mimetype.startsWith("video/")
+    ) {
+      cb(null, true);
+      return;
+    }
+
+    if (
+      file.fieldname === "photos" &&
+      file.mimetype &&
+      file.mimetype.startsWith("image/")
+    ) {
+      cb(null, true);
+      return;
+    }
+
+    cb(new Error("केवल Video या Photo files स्वीकार हैं।"));
+  }
+});
+
+// Video में Original Audio + locked Remix Sound को mix करता है।
+async function mergeRemixAudioIntoVideo(
+  videoPath,
+  soundPath,
+  outputPath,
+  durationSeconds,
+  originalVolume = 0,
+  soundVolume = 100
+) {
+  const originalGain =
+    Math.max(0, Math.min(100, Number(originalVolume || 0))) / 100;
+
+  const soundGain =
+    Math.max(0, Math.min(100, Number(soundVolume || 100))) / 100;
+
+  // पहले check करें कि source video में अपना audio है या नहीं।
+  let hasOriginalAudio = false;
+
+  try {
+    await new Promise((resolve, reject) => {
+      execFile(
+        "ffprobe",
+        [
+          "-v",
+          "error",
+          "-select_streams",
+          "a:0",
+          "-show_entries",
+          "stream=index",
+          "-of",
+          "csv=p=0",
+          videoPath
+        ],
+        { maxBuffer: 5 * 1024 * 1024 },
+        (error, stdout) => {
+          if (!error && String(stdout || "").trim()) {
+            hasOriginalAudio = true;
+          }
+          resolve();
+        }
+      );
+    });
+  } catch {}
+
+  return new Promise((resolve, reject) => {
+    const args = [
+      "-y",
+      "-i",
+      videoPath,
+      "-stream_loop",
+      "-1",
+      "-i",
+      soundPath
+    ];
+
+    if (hasOriginalAudio) {
+      args.push(
+        "-filter_complex",
+        `[0:a:0]volume=${originalGain}[orig];` +
+        `[1:a:0]volume=${soundGain}[music];` +
+        `[orig][music]amix=inputs=2:duration=first:dropout_transition=0[aout]`,
+        "-map",
+        "0:v:0",
+        "-map",
+        "[aout]"
+      );
+    } else {
+      args.push(
+        "-filter_complex",
+        `[1:a:0]volume=${soundGain}[music]`,
+        "-map",
+        "0:v:0",
+        "-map",
+        "[music]"
+      );
+    }
+
+    args.push(
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-t",
+      String(durationSeconds),
+      "-movflags",
+      "+faststart",
+      outputPath
+    );
+
+    execFile(
+      "ffmpeg",
+      args,
+      {
+        maxBuffer: 20 * 1024 * 1024
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          console.error(
+            "MUSIC REMIX AUDIO MIX ERROR:",
+            stderr || error.message
+          );
+
+          reject(
+            new Error(
+              "Remix में Original Audio और Music mix नहीं हो पाए।"
+            )
+          );
+          return;
+        }
+
+        console.log(
+          "✅ MUSIC REMIX AUDIO MIX COMPLETE:",
+          outputPath
+        );
+
+        resolve();
+      }
+    );
+  });
+}
+
+async function getVideoDuration(filePath) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        filePath
+      ],
+      {
+        maxBuffer: 5 * 1024 * 1024
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        const value = Number(String(stdout || "").trim());
+
+        if (!Number.isFinite(value) || value <= 0) {
+          reject(
+            new Error("Video duration valid नहीं मिली।")
+          );
+          return;
+        }
+
+        resolve(value);
+      }
+    );
+  });
+}
+
+// Photo Remix के लिए existing Photo Short जैसा 720x1280 Short बनाना।
+async function createRemixPhotoVideo(
+  photoFiles,
+  outputPath,
+  durationSeconds
+) {
+  const eachDuration =
+    durationSeconds / photoFiles.length;
+
+  const tempFiles = [];
+
+  try {
+    for (let i = 0; i < photoFiles.length; i++) {
+      const photo = photoFiles[i];
+
+      const tempPath = path.join(
+        UPLOADS,
+        Date.now() +
+          "-remix-photo-" +
+          Math.random().toString(36).slice(2, 8) +
+          "-" +
+          i +
+          ".mp4"
+      );
+
+      tempFiles.push(tempPath);
+
+      await new Promise((resolve, reject) => {
+        execFile(
+          "ffmpeg",
+          [
+            "-y",
+            "-loop",
+            "1",
+            "-i",
+            photo.path,
+            "-t",
+            String(eachDuration),
+            "-vf",
+            "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,fps=30",
+            "-r",
+            "30",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "23",
+            "-pix_fmt",
+            "yuv420p",
+            "-an",
+            tempPath
+          ],
+          {
+            maxBuffer: 20 * 1024 * 1024
+          },
+          (error, stdout, stderr) => {
+            if (error) {
+              console.error(
+                "REMIX PHOTO ERROR:",
+                stderr || error.message
+              );
+
+              reject(
+                new Error(
+                  "Remix Photo से Short Video नहीं बन पाया।"
+                )
+              );
+              return;
+            }
+
+            resolve();
+          }
+        );
+      });
+    }
+
+    const concatFile = path.join(
+      UPLOADS,
+      Date.now() +
+        "-remix-photo-concat.txt"
+    );
+
+    const concatContent = tempFiles
+      .map(
+        file =>
+          "file '" +
+          file.replace(/'/g, "'\\''") +
+          "'"
+      )
+      .join("\n");
+
+    fs.writeFileSync(
+      concatFile,
+      concatContent,
+      "utf8"
+    );
+
+    try {
+      await new Promise((resolve, reject) => {
+        execFile(
+          "ffmpeg",
+          [
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            concatFile,
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            outputPath
+          ],
+          {
+            maxBuffer: 20 * 1024 * 1024
+          },
+          (error, stdout, stderr) => {
+            if (error) {
+              console.error(
+                "REMIX PHOTO CONCAT ERROR:",
+                stderr || error.message
+              );
+
+              reject(
+                new Error(
+                  "Remix Photo Short तैयार नहीं हुआ।"
+                )
+              );
+              return;
+            }
+
+            resolve();
+          }
+        );
+      });
+    } finally {
+      try {
+        if (fs.existsSync(concatFile)) {
+          fs.unlinkSync(concatFile);
+        }
+      } catch {}
+    }
+  } finally {
+    for (const tempFile of tempFiles) {
+      try {
+        if (fs.existsSync(tempFile)) {
+          fs.unlinkSync(tempFile);
+        }
+      } catch {}
+    }
+  }
+}
+
+app.post(
+  "/api/remix-music",
+  remixUpload.fields([
+    { name: "video", maxCount: 1 },
+    { name: "photos", maxCount: 5 }
+  ]),
+  async (req, res) => {
+    const files = req.files || {};
+    const videoFiles = files.video || [];
+    const photoFiles = files.photos || [];
+
+    let inputVideoPath = null;
+    let processedVideoPath = null;
+    let mixedVideoPath = null;
+
+    try {
+      // --------------------------------------------------------
+      // Login
+      // --------------------------------------------------------
+      const authenticated =
+        req.session &&
+        req.session.userAuthenticated === true;
+
+      const userId = authenticated
+        ? String(req.session.userId || "").trim()
+        : "";
+
+      if (!authenticated || !userId) {
+        return res.status(401).json({
+          success: false,
+          message:
+            "Music Remix बनाने के लिए पहले VideoApna Account में Login करें।"
+        });
+      }
+
+      // --------------------------------------------------------
+      // Source Short ID
+      // --------------------------------------------------------
+      const sourceShortId =
+        String(
+          req.body.sourceShortId || ""
+        ).trim();
+
+      if (!sourceShortId) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "जिस Short का Remix बनाना है वह नहीं मिला।"
+        });
+      }
+
+      const videos = readVideos();
+
+      const sourceVideo = videos.find(
+        video =>
+          String(video.id || "") ===
+          sourceShortId
+      );
+
+      if (!sourceVideo) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Original VideoApna Short नहीं मिला।"
+        });
+      }
+
+      // केवल VideoApna Short।
+      if (
+        String(sourceVideo.contentType || "")
+          .toLowerCase() !== "short"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "केवल VideoApna Shorts का Remix बनाया जा सकता है।"
+        });
+      }
+
+      if (sourceVideo.remixAllowed === false) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "इस Creator ने इस Short का Remix बंद किया है।"
+        });
+      }
+
+      // --------------------------------------------------------
+      // Locked source sound
+      // Client से कोई नया soundId स्वीकार नहीं करेंगे।
+      // Sound हमेशा Original Short से आएगा।
+      // --------------------------------------------------------
+      const sourceSoundId =
+        String(sourceVideo.soundId || "").trim();
+
+      if (!sourceSoundId) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "इस Short में reusable VideoApna Sound नहीं है।"
+        });
+      }
+
+      const selectedSound =
+        findAllowedSound(sourceSoundId);
+
+      if (!selectedSound) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "इस Short का VideoApna Sound अब उपलब्ध नहीं है।"
+        });
+      }
+
+      const selectedSoundPath =
+        resolveSoundFile(selectedSound);
+
+      if (!selectedSoundPath) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Original VideoApna Sound file उपलब्ध नहीं है।"
+        });
+      }
+
+      // --------------------------------------------------------
+      // Media validation
+      // Video OR 1-5 Photos
+      // --------------------------------------------------------
+      if (
+        videoFiles.length === 0 &&
+        photoFiles.length === 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Remix के लिए Video या 1 से 5 Photos चुनें।"
+        });
+      }
+
+      if (
+        videoFiles.length > 0 &&
+        photoFiles.length > 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "एक Remix में Video या Photos में से एक चुनें।"
+        });
+      }
+
+      // --------------------------------------------------------
+      // Title
+      // --------------------------------------------------------
+      const title =
+        String(
+          req.body.title || ""
+        ).trim();
+
+      if (!title) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "अपने Remix Short का Title लिखें।"
+        });
+      }
+
+      const description =
+        String(
+          req.body.description || ""
+        ).trim();
+
+      // --------------------------------------------------------
+      // Volume
+      // --------------------------------------------------------
+      const originalVolume = Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            req.body.originalVolume ?? 0
+          )
+        )
+      );
+
+      const soundVolume = Math.max(
+        0,
+        Math.min(
+          100,
+          Number(
+            req.body.soundVolume ?? 100
+          )
+        )
+      );
+
+      // --------------------------------------------------------
+      // Input video तैयार करें
+      // --------------------------------------------------------
+      if (videoFiles.length > 0) {
+        inputVideoPath =
+          videoFiles[0].path;
+
+        processedVideoPath =
+          path.join(
+            UPLOADS,
+            Date.now() +
+              "-music-remix.mp4"
+          );
+
+        // Remixed video को standard 720x1280 Short format में रखें।
+        await new Promise(
+          (resolve, reject) => {
+            execFile(
+              "ffmpeg",
+              [
+                "-y",
+                "-i",
+                inputVideoPath,
+                "-vf",
+                "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
+                "-r",
+                "30",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "23",
+                "-pix_fmt",
+                "yuv420p",
+                processedVideoPath
+              ],
+              {
+                maxBuffer:
+                  20 * 1024 * 1024
+              },
+              (
+                error,
+                stdout,
+                stderr
+              ) => {
+                if (error) {
+                  console.error(
+                    "MUSIC REMIX VIDEO PROCESS ERROR:",
+                    stderr ||
+                      error.message
+                  );
+
+                  reject(
+                    new Error(
+                      "Remix Video process नहीं हो पाया।"
+                    )
+                  );
+                  return;
+                }
+
+                resolve();
+              }
+            );
+          }
+        );
+      } else {
+        // Photo Remix: अधिकतम 5 photos।
+        if (photoFiles.length > 5) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "अधिकतम 5 Photos चुन सकते हैं।"
+          });
+        }
+
+        const requestedDuration =
+          Number(
+            req.body.duration || 10
+          );
+
+        const duration =
+          [10, 15, 20].includes(
+            requestedDuration
+          )
+            ? requestedDuration
+            : 10;
+
+        processedVideoPath =
+          path.join(
+            UPLOADS,
+            Date.now() +
+              "-music-remix-photo.mp4"
+          );
+
+        await createRemixPhotoVideo(
+          photoFiles,
+          processedVideoPath,
+          duration
+        );
+      }
+
+      // Original input upload हटाएँ।
+      for (const file of videoFiles) {
+        try {
+          if (
+            file.path &&
+            fs.existsSync(file.path)
+          ) {
+            fs.unlinkSync(file.path);
+          }
+        } catch {}
+      }
+
+      inputVideoPath = null;
+
+      // --------------------------------------------------------
+      // Duration
+      // --------------------------------------------------------
+      let videoDuration =
+        await getVideoDuration(
+          processedVideoPath
+        );
+
+      // बहुत लंबा Media Shorts system में नहीं डालना।
+      if (videoDuration > 180) {
+        videoDuration = 180;
+
+        const trimmedPath =
+          processedVideoPath.replace(
+            /\.mp4$/i,
+            "-trimmed.mp4"
+          );
+
+        await new Promise(
+          (resolve, reject) => {
+            execFile(
+              "ffmpeg",
+              [
+                "-y",
+                "-i",
+                processedVideoPath,
+                "-t",
+                "180",
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                trimmedPath
+              ],
+              {
+                maxBuffer:
+                  20 * 1024 * 1024
+              },
+              error => {
+                if (error) {
+                  reject(error);
+                  return;
+                }
+                resolve();
+              }
+            );
+          }
+        );
+
+        fs.unlinkSync(
+          processedVideoPath
+        );
+
+        processedVideoPath =
+          trimmedPath;
+      }
+
+      // --------------------------------------------------------
+      // Locked VideoApna Sound + Original Audio mix
+      // --------------------------------------------------------
+      mixedVideoPath =
+        processedVideoPath.replace(
+          /\.mp4$/i,
+          "-mixed.mp4"
+        );
+
+      await mergeRemixAudioIntoVideo(
+        processedVideoPath,
+        selectedSoundPath,
+        mixedVideoPath,
+        videoDuration,
+        originalVolume,
+        soundVolume
+      );
+
+      if (
+        fs.existsSync(
+          processedVideoPath
+        )
+      ) {
+        fs.unlinkSync(
+          processedVideoPath
+        );
+      }
+
+      processedVideoPath = null;
+
+      // --------------------------------------------------------
+      // VCDN
+      // --------------------------------------------------------
+      const outputFilename =
+        path.basename(
+          mixedVideoPath
+        );
+
+      let vcdn = null;
+
+      try {
+        if (
+          String(
+            process.env.VCDN_API_KEY || ""
+          ).trim()
+        ) {
+          console.log(
+            "VCDN Music Remix upload starting:",
+            outputFilename
+          );
+
+          vcdn =
+            await uploadVideoToVcdn(
+              mixedVideoPath,
+              title
+            );
+
+          console.log(
+            "VCDN Music Remix upload ready:",
+            vcdn.vcdnVideoId
+          );
+        }
+      } catch (vcdnError) {
+        console.error(
+          "VCDN Music Remix upload failed. Local fallback:",
+          vcdnError.message
+        );
+
+        vcdn = null;
+      }
+
+      const localVideoUrl =
+        "/uploads/" +
+        outputFilename;
+
+      // --------------------------------------------------------
+      // New VideoApna Short
+      // --------------------------------------------------------
+      const remixVideo = {
+        id: Date.now(),
+
+        userId,
+        ownerUserId: userId,
+
+        visibility: "public",
+
+        contentType: "short",
+
+        remixAllowed: true,
+
+        remixMode: "music",
+
+        remixSourceId:
+          String(sourceVideo.id || ""),
+
+        title,
+
+        description,
+
+        category:
+          String(
+            req.body.category ||
+              "मनोरंजन"
+          ),
+
+        template: "normal",
+
+        channel: "VideoApna",
+
+        views: "0 views",
+
+        url:
+          vcdn &&
+          vcdn.vcdnPlaybackUrl
+            ? vcdn.vcdnPlaybackUrl
+            : localVideoUrl,
+
+        localUrl:
+          localVideoUrl,
+
+        fileName:
+          outputFilename,
+
+        vcdnVideoId:
+          vcdn
+            ? vcdn.vcdnVideoId
+            : "",
+
+        vcdnStatus:
+          vcdn
+            ? vcdn.vcdnStatus
+            : "local",
+
+        vcdnPlaybackUrl:
+          vcdn
+            ? vcdn.vcdnPlaybackUrl
+            : "",
+
+        embedUrl:
+          vcdn
+            ? vcdn.vcdnEmbedUrl
+            : "",
+
+        posterUrl:
+          vcdn
+            ? vcdn.vcdnPosterUrl
+            : "",
+
+        // केवल Original Short का locked VideoApna Sound।
+        soundId:
+          String(
+            selectedSound.id || ""
+          ),
+
+        soundTitle:
+          String(
+            selectedSound.title || ""
+          ),
+
+        soundUrl:
+          String(
+            selectedSound.url || ""
+          ),
+
+        originalVolume,
+
+        soundVolume,
+
+        duration:
+          Number(
+            videoDuration || 0
+          ),
+
+        createdAt:
+          new Date().toISOString()
+      };
+
+      videos.unshift(
+        remixVideo
+      );
+
+      saveVideos(videos);
+
+      console.log(
+        "✅ VIDEOAPNA MUSIC REMIX CREATED:",
+        remixVideo.id,
+        "source:",
+        sourceVideo.id,
+        "sound:",
+        selectedSound.id
+      );
+
+      return res.json({
+        success: true,
+        message:
+          "🎵 Music Remix Short तैयार हो गया!",
+        video: remixVideo
+      });
+    } catch (error) {
+      console.error(
+        "MUSIC REMIX SERVER ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Music Remix बनाने में समस्या हुई।"
+      });
+    } finally {
+      // Temporary files cleanup।
+      for (const filePath of [
+        inputVideoPath,
+        processedVideoPath
+      ]) {
+        try {
+          if (
+            filePath &&
+            fs.existsSync(filePath)
+          ) {
+            fs.unlinkSync(filePath);
+          }
+        } catch {}
+      }
+
+      // Mixed file सफल होने पर भी local file जानबूझकर रखें।
+      // यही VCDN unavailable होने पर fallback URL है।
+    }
+  }
+);
+
+
+
+/*
+ * ============================================================
+ * 🤝 VIDEOAPNA COLLAB REMIX
+ *
+ * केवल VideoApna Short + Remix permission ON।
+ * Browser से आया WebM पहले ही:
+ *   Original Short + Mic
+ * का mixed recording है।
+ *
+ * इसलिए यहाँ Original Sound को दोबारा add नहीं करेंगे।
+ * ============================================================
+ */
+
+app.post(
+  "/api/remix-collab",
+  remixUpload.single("video"),
+  async (req, res) => {
+
+    let inputVideoPath = null;
+    let processedVideoPath = null;
+
+    try {
+
+      // --------------------------------------------------------
+      // Login
+      // --------------------------------------------------------
+
+      const authenticated =
+        req.session &&
+        req.session.userAuthenticated === true;
+
+      const userId =
+        authenticated
+          ? String(
+              req.session.userId || ""
+            ).trim()
+          : "";
+
+      if (!authenticated || !userId) {
+
+        return res.status(401).json({
+          success: false,
+          message:
+            "Collab बनाने के लिए पहले VideoApna Account में Login करें।"
+        });
+
+      }
+
+
+      // --------------------------------------------------------
+      // Source Short
+      // --------------------------------------------------------
+
+      const sourceShortId =
+        String(
+          req.body.sourceShortId || ""
+        ).trim().replace(/^va-/, "");
+
+      if (!sourceShortId) {
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "जिस Short का Collab बनाना है वह नहीं मिला।"
+        });
+
+      }
+
+      const videos =
+        readVideos();
+
+      const sourceVideo =
+        videos.find(
+          video =>
+            String(video.id || "") ===
+            sourceShortId
+        );
+
+      if (!sourceVideo) {
+
+        return res.status(404).json({
+          success: false,
+          message:
+            "Original VideoApna Short नहीं मिला।"
+        });
+
+      }
+
+
+      // --------------------------------------------------------
+      // केवल Short
+      // --------------------------------------------------------
+
+      if (
+        String(
+          sourceVideo.contentType || ""
+        ).toLowerCase() !== "short"
+      ) {
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "केवल VideoApna Shorts का Collab बनाया जा सकता है।"
+        });
+
+      }
+
+
+      // --------------------------------------------------------
+      // Creator permission
+      // --------------------------------------------------------
+
+      if (
+        sourceVideo.remixAllowed === false
+      ) {
+
+        return res.status(403).json({
+          success: false,
+          message:
+            "इस Creator ने इस Short का Remix बंद किया है।"
+        });
+
+      }
+
+
+      // --------------------------------------------------------
+      // Recorded Collab video
+      // --------------------------------------------------------
+
+      if (
+        !req.file ||
+        !req.file.path
+      ) {
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "Collab Recording नहीं मिली।"
+        });
+
+      }
+
+      inputVideoPath =
+        req.file.path;
+
+
+      // --------------------------------------------------------
+      // Duration
+      // --------------------------------------------------------
+
+      let sourceDuration = 0;
+
+      try {
+
+        sourceDuration =
+          await getVideoDuration(
+            inputVideoPath
+          );
+
+      } catch {
+        sourceDuration = 0;
+      }
+
+      const maxDuration = 180;
+
+      /*
+       * WebM को standard MP4 में convert करें।
+       *
+       * Canvas recording 720x1280 है।
+       * Audio पहले ही browser में mix हो चुका है।
+       */
+
+      processedVideoPath =
+        path.join(
+          UPLOADS,
+          Date.now() +
+            "-collab-processed-" +
+            Math.random()
+              .toString(36)
+              .slice(2, 8) +
+            ".mp4"
+        );
+
+      await new Promise(
+        (resolve, reject) => {
+
+          const args = [
+            "-y",
+            "-i",
+            inputVideoPath,
+
+            "-vf",
+            "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
+
+            "-r",
+            "30",
+
+            "-c:v",
+            "libx264",
+
+            "-preset",
+            "ultrafast",
+
+            "-crf",
+            "23",
+
+            "-pix_fmt",
+            "yuv420p",
+
+            "-c:a",
+            "aac",
+
+            "-b:a",
+            "128k",
+
+            "-t",
+            String(maxDuration),
+
+            "-movflags",
+            "+faststart",
+
+            processedVideoPath
+          ];
+
+          execFile(
+            "ffmpeg",
+            args,
+            {
+              maxBuffer:
+                20 * 1024 * 1024
+            },
+            (
+              error,
+              stdout,
+              stderr
+            ) => {
+
+              if (error) {
+
+                console.error(
+                  "❌ COLLAB FFMPEG ERROR:",
+                  stderr ||
+                    error.message
+                );
+
+                reject(
+                  new Error(
+                    "Collab Video को MP4 में convert नहीं किया जा सका।"
+                  )
+                );
+
+                return;
+              }
+
+              resolve();
+
+            }
+          );
+
+        }
+      );
+
+
+      // --------------------------------------------------------
+      // Final duration
+      // --------------------------------------------------------
+
+      let videoDuration = 0;
+
+      try {
+
+        videoDuration =
+          await getVideoDuration(
+            processedVideoPath
+          );
+
+      } catch {
+
+        videoDuration =
+          sourceDuration > maxDuration
+            ? maxDuration
+            : sourceDuration;
+
+      }
+
+
+      // --------------------------------------------------------
+      // Title / Description
+      // --------------------------------------------------------
+
+      const title =
+        String(
+          req.body.title ||
+          (
+            "Collab - " +
+            (
+              sourceVideo.title ||
+              "VideoApna Short"
+            )
+          )
+        ).trim().slice(0, 150);
+
+      const description =
+        String(
+          req.body.description ||
+          "VideoApna Collab Short"
+        ).trim().slice(0, 2000);
+
+
+      if (!title) {
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "Collab Short का Title नहीं मिला।"
+        });
+
+      }
+
+
+      // --------------------------------------------------------
+      // VCDN Upload
+      // --------------------------------------------------------
+
+      let vcdn = null;
+
+      if (
+        process.env.VCDN_API_KEY
+      ) {
+
+        try {
+
+          vcdn =
+            await uploadVideoToVcdn(
+              processedVideoPath,
+              title
+            );
+
+        } catch (vcdnError) {
+
+          console.error(
+            "⚠️ COLLAB VCDN UPLOAD FAILED:",
+            vcdnError
+          );
+
+          vcdn = null;
+
+        }
+
+      }
+
+
+      // --------------------------------------------------------
+      // Local fallback URL
+      // --------------------------------------------------------
+
+      const outputFilename =
+        path.basename(
+          processedVideoPath
+        );
+
+      const localVideoUrl =
+        "/uploads/" +
+        outputFilename;
+
+
+      // --------------------------------------------------------
+      // Save VideoApna Short
+      // --------------------------------------------------------
+
+      const remixVideo = {
+
+        id:
+          Date.now(),
+
+        userId:
+          userId,
+
+        ownerUserId:
+          userId,
+
+        visibility:
+          "public",
+
+        source:
+          "videoapna",
+
+        contentType:
+          "short",
+
+        remixAllowed:
+          true,
+
+        remixMode:
+          "collab",
+
+        remixSourceId:
+          String(sourceVideo.id || ""),
+
+        title:
+          title,
+
+        description:
+          description,
+
+        category:
+          String(
+            req.body.category ||
+            sourceVideo.category ||
+            "मनोरंजन"
+          ),
+
+        template:
+          "normal",
+
+        channel:
+          "VideoApna",
+
+        views:
+          "0 views",
+
+        viewCount:
+          0,
+
+        likes:
+          0,
+
+        url:
+          vcdn &&
+          vcdn.vcdnPlaybackUrl
+            ? vcdn.vcdnPlaybackUrl
+            : localVideoUrl,
+
+        localUrl:
+          localVideoUrl,
+
+        fileName:
+          outputFilename,
+
+        vcdnVideoId:
+          vcdn
+            ? vcdn.vcdnVideoId
+            : "",
+
+        vcdnStatus:
+          vcdn
+            ? vcdn.vcdnStatus
+            : "local",
+
+        vcdnPlaybackUrl:
+          vcdn
+            ? vcdn.vcdnPlaybackUrl
+            : "",
+
+        embedUrl:
+          vcdn
+            ? vcdn.vcdnEmbedUrl
+            : "",
+
+        posterUrl:
+          vcdn
+            ? vcdn.vcdnPosterUrl
+            : "",
+
+        soundId:
+          sourceVideo.soundId ||
+          "",
+
+        soundTitle:
+          sourceVideo.soundTitle ||
+          "",
+
+        soundUrl:
+          sourceVideo.soundUrl ||
+          "",
+
+        soundChannel:
+          sourceVideo.soundChannel ||
+          "",
+
+        soundLicense:
+          sourceVideo.soundLicense ||
+          "",
+
+        soundSource:
+          sourceVideo.soundSource ||
+          "",
+
+        originalVolume:
+          Number(
+            req.body.originalVolume ||
+            100
+          ),
+
+        micVolume:
+          Number(
+            req.body.micVolume ||
+            100
+          ),
+
+        duration:
+          Number(
+            videoDuration || 0
+          ),
+
+        createdAt:
+          new Date().toISOString()
+
+      };
+
+
+      videos.unshift(
+        remixVideo
+      );
+
+      saveVideos(
+        videos
+      );
+
+
+      console.log(
+        "✅ VIDEOAPNA COLLAB CREATED:",
+        remixVideo.id,
+        "source:",
+        sourceVideo.id
+      );
+
+
+      return res.json({
+
+        success:
+          true,
+
+        message:
+          "🤝 Collab Short तैयार हो गया!",
+
+        video:
+          remixVideo
+
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "COLLAB REMIX SERVER ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+
+        success:
+          false,
+
+        message:
+          error.message ||
+          "Collab Short बनाने में समस्या हुई।"
+
+      });
+
+
+    } finally {
+
+      /*
+       * केवल temporary input और processed
+       * file cleanup करें।
+       *
+       * Processed MP4 को local fallback के लिए
+       * जानबूझकर रखा जाता है।
+       */
+
+      try {
+
+        if (
+          inputVideoPath &&
+          fs.existsSync(
+            inputVideoPath
+          )
+        ) {
+
+          fs.unlinkSync(
+            inputVideoPath
+          );
+
+        }
+
+      } catch {}
+
+    }
+
+  }
+);
+
+
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("");

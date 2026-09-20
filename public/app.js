@@ -8937,6 +8937,252 @@ window.videoApnaSelectedSound = null;
 
       actions.appendChild(soundBtn);
 
+      /*
+       * ========================================================
+       * 🎬 VIDEOAPNA REMIX
+       * केवल अपने Short + Remix permission ON पर।
+       * ========================================================
+       */
+      const isVideoApnaShort =
+        String(video.source || "").toLowerCase() === "videoapna" &&
+        String(video.contentType || "").toLowerCase() === "short" &&
+        video.remixAllowed !== false;
+
+      if (isVideoApnaShort) {
+
+        const remixBtn =
+          document.createElement("button");
+
+        remixBtn.type = "button";
+
+        remixBtn.className =
+          "videoapna-short-remix";
+
+        remixBtn.textContent =
+          "🎬 Remix";
+
+        remixBtn.title =
+          "इस Short का Remix बनाएँ";
+
+        remixBtn.style.cssText = `
+          border: 0;
+          border-radius: 12px;
+          padding: 9px 12px;
+          background: rgba(0,0,0,.68);
+          color: #fff;
+          font-size: 14px;
+          font-weight: 700;
+          cursor: pointer;
+        `;
+
+        remixBtn.addEventListener(
+          "click",
+          function (event) {
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            shortsIndex = index;
+
+            /*
+             * Remix की पूरी जानकारी एक ही जगह रखें।
+             */
+            window.videoApnaRemixState = {
+              mode: "",
+              sourceShortId:
+                String(video.id || ""),
+              sourceVideo:
+                video
+            };
+
+            /*
+             * केवल दो विकल्प।
+             */
+            const oldMenu =
+              document.getElementById(
+                "videoApnaRemixMenu"
+              );
+
+            if (oldMenu) {
+              oldMenu.remove();
+            }
+
+            const menu =
+              document.createElement("div");
+
+            menu.id =
+              "videoApnaRemixMenu";
+
+            menu.style.cssText = `
+              position: fixed;
+              inset: 0;
+              z-index: 999999;
+              display: flex;
+              align-items: flex-end;
+              justify-content: center;
+              background: rgba(0,0,0,.55);
+              padding: 16px;
+              box-sizing: border-box;
+            `;
+
+            const box =
+              document.createElement("div");
+
+            box.style.cssText = `
+              width: min(420px, 100%);
+              background: #fff;
+              color: #111;
+              border-radius: 22px;
+              padding: 18px;
+              box-sizing: border-box;
+              box-shadow: 0 10px 40px rgba(0,0,0,.35);
+            `;
+
+            const heading =
+              document.createElement("div");
+
+            heading.textContent =
+              "🎬 Remix";
+
+            heading.style.cssText = `
+              font-size: 21px;
+              font-weight: 700;
+              text-align: center;
+              margin-bottom: 16px;
+            `;
+
+            function makeButton(text) {
+
+              const button =
+                document.createElement("button");
+
+              button.type = "button";
+
+              button.textContent = text;
+
+              button.style.cssText = `
+                width: 100%;
+                min-height: 54px;
+                margin-bottom: 10px;
+                border: 0;
+                border-radius: 14px;
+                background: #f1f1f1;
+                color: #111;
+                font-size: 17px;
+                font-weight: 600;
+              `;
+
+              return button;
+            }
+
+            const musicButton =
+              makeButton("🎵 Music");
+
+            const collabButton =
+              makeButton("🤝 Collab");
+
+            const closeButton =
+              makeButton("✕ बंद करें");
+
+            function closeMenu() {
+              menu.remove();
+            }
+
+            musicButton.addEventListener(
+              "click",
+              function (event) {
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                window.videoApnaRemixState.mode =
+                  "music";
+
+                closeMenu();
+
+                console.log(
+                  "🎵 Music Remix:",
+                  window.videoApnaRemixState
+                );
+
+                if (
+                  typeof window.videoApnaOpenRemixCreator ===
+                  "function"
+                ) {
+                  window.videoApnaOpenRemixCreator(
+                    "music",
+                    video
+                  );
+                } else {
+                  alert(
+                    "🎵 Music Remix Creator अगला Step में जोड़ा जाएगा।"
+                  );
+                }
+              }
+            );
+
+            collabButton.addEventListener(
+              "click",
+              function (event) {
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                window.videoApnaRemixState.mode =
+                  "collab";
+
+                closeMenu();
+
+                console.log(
+                  "🤝 Collab Remix:",
+                  window.videoApnaRemixState
+                );
+
+                if (
+                  typeof window.videoApnaOpenRemixCreator ===
+                  "function"
+                ) {
+                  window.videoApnaOpenRemixCreator(
+                    "collab",
+                    video
+                  );
+                } else {
+                  alert(
+                    "🤝 Collab Creator अगला Step में जोड़ा जाएगा।"
+                  );
+                }
+              }
+            );
+
+            closeButton.addEventListener(
+              "click",
+              closeMenu
+            );
+
+            menu.addEventListener(
+              "click",
+              function (event) {
+                if (event.target === menu) {
+                  closeMenu();
+                }
+              }
+            );
+
+            box.appendChild(heading);
+            box.appendChild(musicButton);
+            box.appendChild(collabButton);
+            box.appendChild(closeButton);
+
+            menu.appendChild(box);
+
+            document.body.appendChild(menu);
+          }
+        );
+
+        actions.appendChild(remixBtn);
+      }
+
+
       item.appendChild(actions);
 
       shortsFeed.appendChild(item);
@@ -9358,7 +9604,2383 @@ window.videoApnaSelectedSound = null;
   }
 
 
-  window.videoApnaLoadShorts =
+  
+  /*
+   * ============================================================
+   * VIDEOAPNA REMIX CREATOR OPENER
+   * ============================================================
+   */
+  window.videoApnaOpenRemixCreator = function (mode, sourceVideo) {
+
+    const modal =
+      document.getElementById("videoApnaRemixCreator");
+
+    const musicCreator =
+      document.getElementById("musicRemixCreator");
+
+    const collabCreator =
+      document.getElementById("collabRemixCreator");
+
+    const title =
+      document.getElementById("remixCreatorTitle");
+
+    const soundTitle =
+      document.getElementById("musicRemixSourceTitle");
+
+    const collabSource =
+      document.getElementById("collabSourcePlayer");
+
+    if (!modal || !musicCreator || !collabCreator) {
+      console.error(
+        "❌ Remix Creator elements नहीं मिले।"
+      );
+      return;
+    }
+
+    window.videoApnaRemixState =
+      window.videoApnaRemixState || {};
+
+    window.videoApnaRemixState.mode =
+      String(mode || "").toLowerCase();
+
+    window.videoApnaRemixState.sourceVideo =
+      sourceVideo || null;
+
+    musicCreator.classList.add("hidden");
+    collabCreator.classList.add("hidden");
+
+    if (
+      window.videoApnaRemixState.mode === "music"
+    ) {
+
+      if (title) {
+        title.textContent = "🎵 Music Remix";
+      }
+
+      musicCreator.classList.remove("hidden");
+
+      if (soundTitle) {
+        soundTitle.textContent =
+          sourceVideo?.soundTitle ||
+          "Original Sound";
+      }
+
+      const originalVolume =
+        document.getElementById(
+          "musicRemixOriginalVolume"
+        );
+
+      const soundVolume =
+        document.getElementById(
+          "musicRemixSoundVolume"
+        );
+
+      if (originalVolume) {
+        originalVolume.value = "0";
+      }
+
+      if (soundVolume) {
+        soundVolume.value = "100";
+      }
+
+      modal.classList.remove("hidden");
+
+      console.log(
+        "🎵 Music Remix Creator OPEN:",
+        sourceVideo?.title || ""
+      );
+
+      return;
+    }
+
+    if (
+      window.videoApnaRemixState.mode === "collab"
+    ) {
+
+      if (title) {
+        title.textContent = "🤝 Collab";
+      }
+
+      collabCreator.classList.remove("hidden");
+
+      modal.classList.remove("hidden");
+
+      if (collabSource) {
+        collabSource.innerHTML = "";
+
+        const sourceText =
+          document.createElement("div");
+
+        sourceText.textContent =
+          sourceVideo?.title ||
+          "Original Short";
+
+        sourceText.style.cssText =
+          "padding:20px;color:#fff;text-align:center;";
+
+        collabSource.appendChild(sourceText);
+      }
+
+      console.log(
+        "🤝 Collab Creator OPEN:",
+        sourceVideo?.title || ""
+      );
+
+      return;
+    }
+
+    console.warn(
+      "⚠️ Unknown Remix mode:",
+      mode
+    );
+  };
+
+  /*
+   * Remix Creator बंद करें।
+   */
+  (function () {
+
+    const closeButton =
+      document.getElementById(
+        "closeRemixCreator"
+      );
+
+    const modal =
+      document.getElementById(
+        "videoApnaRemixCreator"
+      );
+
+    if (!closeButton || !modal) {
+      return;
+    }
+
+    closeButton.addEventListener(
+      "click",
+      function () {
+
+        modal.classList.add("hidden");
+
+        const camera =
+          document.getElementById(
+            "collabCameraPreview"
+          );
+
+        if (
+          camera &&
+          camera.srcObject
+        ) {
+
+          camera.srcObject
+            .getTracks()
+            .forEach(function (track) {
+              try {
+                track.stop();
+              } catch (e) {}
+            });
+
+          camera.srcObject = null;
+        }
+
+        console.log(
+          "🎬 Remix Creator CLOSED"
+        );
+      }
+    );
+
+  })();
+
+
+
+  /*
+   * ============================================================
+   * VIDEOAPNA MUSIC REMIX FRONTEND HANDLERS
+   * ============================================================
+   */
+
+  window.videoApnaMusicRemixFiles = {
+    video: null,
+    photos: []
+  };
+
+  (function () {
+    const videoButton =
+      document.getElementById("musicRemixVideoButton");
+
+    const videoInput =
+      document.getElementById("musicRemixVideoInput");
+
+    const photoButton =
+      document.getElementById("musicRemixPhotoButton");
+
+    const photoInput =
+      document.getElementById("musicRemixPhotoInput");
+
+    const cameraButton =
+      document.getElementById("musicRemixCameraButton");
+
+    const cameraInput =
+      document.getElementById("musicRemixCameraInput");
+
+    const status =
+      document.getElementById("musicRemixMediaStatus");
+
+    const publishButton =
+      document.getElementById("musicRemixPublishButton");
+
+    const originalVolume =
+      document.getElementById("musicRemixOriginalVolume");
+
+    const soundVolume =
+      document.getElementById("musicRemixSoundVolume");
+
+    const titleInput =
+      document.getElementById("musicRemixTitle");
+
+    const descriptionInput =
+      document.getElementById("musicRemixDescription");
+
+    if (!videoButton ||
+        !videoInput ||
+        !photoButton ||
+        !photoInput ||
+        !cameraButton ||
+        !cameraInput ||
+        !publishButton) {
+      console.warn(
+        "⚠️ Music Remix frontend elements नहीं मिले।"
+      );
+      return;
+    }
+
+    if (
+      videoButton.dataset.musicRemixBound === "1"
+    ) {
+      return;
+    }
+
+    videoButton.dataset.musicRemixBound = "1";
+
+    function updateStatus(text) {
+      if (status) {
+        status.textContent = text || "";
+      }
+    }
+
+    function clearVideoSelection() {
+      window.videoApnaMusicRemixFiles.video = null;
+
+      try {
+        videoInput.value = "";
+      } catch (e) {}
+    }
+
+    function clearPhotoSelection() {
+      window.videoApnaMusicRemixFiles.photos = [];
+
+      try {
+        photoInput.value = "";
+      } catch (e) {}
+    }
+
+    function setVideoFile(file) {
+      if (!file) {
+        return;
+      }
+
+      if (
+        !file.type ||
+        !file.type.startsWith("video/")
+      ) {
+        updateStatus(
+          "❌ केवल Video file चुनें।"
+        );
+        return;
+      }
+
+      clearPhotoSelection();
+
+      window.videoApnaMusicRemixFiles.video = file;
+
+      updateStatus(
+        "🎬 Video चुना गया: " +
+        file.name
+      );
+    }
+
+    function setPhotoFiles(fileList) {
+      const files =
+        Array.from(fileList || []).filter(
+          file =>
+            file &&
+            file.type &&
+            file.type.startsWith("image/")
+        );
+
+      if (!files.length) {
+        updateStatus(
+          "❌ कम से कम 1 Photo चुनें।"
+        );
+        return;
+      }
+
+      if (files.length > 5) {
+        updateStatus(
+          "❌ अधिकतम 5 Photos चुन सकते हैं।"
+        );
+        return;
+      }
+
+      clearVideoSelection();
+
+      window.videoApnaMusicRemixFiles.photos =
+        files;
+
+      updateStatus(
+        "📸 " +
+        files.length +
+        " Photo चुने गए।"
+      );
+    }
+
+    /*
+     * Gallery Video
+     */
+    videoButton.addEventListener(
+      "click",
+      function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        try {
+          videoInput.value = "";
+        } catch (e) {}
+
+        videoInput.click();
+      }
+    );
+
+    videoInput.addEventListener(
+      "change",
+      function () {
+        const file =
+          videoInput.files &&
+          videoInput.files[0];
+
+        setVideoFile(file);
+      }
+    );
+
+    /*
+     * Gallery Photos
+     */
+    photoButton.addEventListener(
+      "click",
+      function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        try {
+          photoInput.value = "";
+        } catch (e) {}
+
+        photoInput.click();
+      }
+    );
+
+    photoInput.addEventListener(
+      "change",
+      function () {
+        setPhotoFiles(
+          photoInput.files
+        );
+      }
+    );
+
+    /*
+     * Camera से Video
+     *
+     * Android में यह existing Capacitor file picker /
+     * camera capture flow को इस्तेमाल करेगा।
+     */
+    cameraButton.addEventListener(
+      "click",
+      function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        try {
+          cameraInput.value = "";
+        } catch (e) {}
+
+        cameraInput.click();
+      }
+    );
+
+    cameraInput.addEventListener(
+      "change",
+      function () {
+        const file =
+          cameraInput.files &&
+          cameraInput.files[0];
+
+        setVideoFile(file);
+
+        if (file) {
+          updateStatus(
+            "📷 Camera Video चुना गया: " +
+            file.name
+          );
+        }
+      }
+    );
+
+    /*
+     * Music Remix Publish
+     */
+    publishButton.addEventListener(
+      "click",
+      async function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const state =
+          window.videoApnaRemixState || {};
+
+        const sourceVideo =
+          state.sourceVideo || null;
+
+        const sourceShortId =
+          String(
+            state.sourceShortId ||
+            sourceVideo?.id ||
+            ""
+          ).trim().replace(/^va-/, "");
+
+        if (!sourceShortId) {
+          updateStatus(
+            "❌ Original Short नहीं मिला।"
+          );
+          return;
+        }
+
+        const video =
+          window.videoApnaMusicRemixFiles.video;
+
+        const photos =
+          window.videoApnaMusicRemixFiles.photos ||
+          [];
+
+        if (!video && !photos.length) {
+          updateStatus(
+            "❌ पहले Gallery से Video, Photos या Camera Video चुनें।"
+          );
+          return;
+        }
+
+        if (video && photos.length) {
+          updateStatus(
+            "❌ एक साथ Video और Photos नहीं चुन सकते।"
+          );
+          return;
+        }
+
+        const title =
+          String(
+            titleInput?.value || ""
+          ).trim();
+
+        if (!title) {
+          if (titleInput) {
+            titleInput.focus();
+          }
+
+          updateStatus(
+            "❌ अपने Remix Short का Title लिखें।"
+          );
+          return;
+        }
+
+        const description =
+          String(
+            descriptionInput?.value || ""
+          ).trim();
+
+        const original =
+          Math.max(
+            0,
+            Math.min(
+              100,
+              Number(
+                originalVolume?.value || 0
+              )
+            )
+          );
+
+        const sound =
+          Math.max(
+            0,
+            Math.min(
+              100,
+              Number(
+                soundVolume?.value || 100
+              )
+            )
+          );
+
+        const formData =
+          new FormData();
+
+        formData.append(
+          "sourceShortId",
+          sourceShortId
+        );
+
+        formData.append(
+          "title",
+          title
+        );
+
+        formData.append(
+          "description",
+          description
+        );
+
+        formData.append(
+          "originalVolume",
+          String(original)
+        );
+
+        formData.append(
+          "soundVolume",
+          String(sound)
+        );
+
+        /*
+         * Photo Remix duration.
+         * Existing Photo Short UI की duration setting हो
+         * तो उसे इस्तेमाल करेंगे; नहीं तो 10 sec।
+         */
+        const durationElement =
+          document.getElementById(
+            "musicRemixPhotoDuration"
+          );
+
+        if (durationElement) {
+          formData.append(
+            "duration",
+            String(
+              durationElement.value || 10
+            )
+          );
+        } else {
+          formData.append(
+            "duration",
+            "10"
+          );
+        }
+
+        if (video) {
+          formData.append(
+            "video",
+            video,
+            video.name || "remix-video.mp4"
+          );
+        } else {
+          photos.forEach(
+            function (photo) {
+              formData.append(
+                "photos",
+                photo,
+                photo.name || "remix-photo.jpg"
+              );
+            }
+          );
+        }
+
+        const oldText =
+          publishButton.textContent;
+
+        publishButton.disabled = true;
+        publishButton.textContent =
+          "⏳ Remix बनाया जा रहा है...";
+
+        updateStatus(
+          "⏳ VideoApna Music Remix तैयार हो रहा है..."
+        );
+
+        try {
+          const response =
+            await fetch(
+              "/api/remix-music",
+              {
+                method: "POST",
+                body: formData
+              }
+            );
+
+          let data = null;
+
+          try {
+            data =
+              await response.json();
+          } catch (e) {
+            data = null;
+          }
+
+          if (
+            !response.ok ||
+            !data ||
+            !data.success
+          ) {
+            throw new Error(
+              data?.message ||
+              "Music Remix upload failed."
+            );
+          }
+
+          const newVideo =
+            data.video || null;
+
+          console.log(
+            "✅ MUSIC REMIX PUBLISHED:",
+            newVideo
+          );
+
+          updateStatus(
+            "✅ Music Remix Short तैयार हो गया!"
+          );
+
+          /*
+           * अगर app में serverVideos मौजूद है,
+           * तो नया Short उसी list में जोड़ दें।
+           */
+          if (
+            newVideo &&
+            Array.isArray(
+              window.serverVideos
+            )
+          ) {
+            const exists =
+              window.serverVideos.some(
+                item =>
+                  String(item.id) ===
+                  String(newVideo.id)
+              );
+
+            if (!exists) {
+              window.serverVideos.unshift(
+                newVideo
+              );
+            }
+          }
+
+          /*
+           * Global video lists मौजूद हों तो उनमें भी
+           * नया Short डालने की कोशिश।
+           */
+          if (
+            newVideo &&
+            Array.isArray(
+              window.videoApnaVideos
+            )
+          ) {
+            const exists =
+              window.videoApnaVideos.some(
+                item =>
+                  String(item.id) ===
+                  String(newVideo.id)
+              );
+
+            if (!exists) {
+              window.videoApnaVideos.unshift(
+                newVideo
+              );
+            }
+          }
+
+          /*
+           * Creator बंद करें।
+           */
+          setTimeout(
+            function () {
+              const modal =
+                document.getElementById(
+                  "videoApnaRemixCreator"
+                );
+
+              if (modal) {
+                modal.classList.add(
+                  "hidden"
+                );
+              }
+
+              if (titleInput) {
+                titleInput.value = "";
+              }
+
+              if (descriptionInput) {
+                descriptionInput.value = "";
+              }
+
+              clearVideoSelection();
+              clearPhotoSelection();
+
+              updateStatus("");
+
+              /*
+               * Shorts/Home को fresh server data
+               * से reload करने की कोशिश।
+               */
+              if (
+                typeof window.loadVideos ===
+                "function"
+              ) {
+                try {
+                  window.loadVideos();
+                } catch (e) {
+                  console.log(
+                    "loadVideos refresh skipped:",
+                    e
+                  );
+                }
+              }
+            },
+            900
+          );
+
+        } catch (error) {
+          console.error(
+            "❌ MUSIC REMIX PUBLISH ERROR:",
+            error
+          );
+
+          updateStatus(
+            "❌ " +
+            (
+              error?.message ||
+              "Music Remix बनाने में समस्या हुई।"
+            )
+          );
+
+        } finally {
+          publishButton.disabled =
+            false;
+
+          publishButton.textContent =
+            oldText ||
+            "🚀 Music Remix बनाएं";
+        }
+      }
+    );
+
+    /*
+     * Volume labels के पास live values दिखाने की जरूरत
+     * नहीं है; server को final slider values मिलेंगे।
+     */
+    if (originalVolume) {
+      originalVolume.addEventListener(
+        "input",
+        function () {
+          originalVolume.title =
+            "Original Audio: " +
+            originalVolume.value +
+            "%";
+        }
+      );
+    }
+
+    if (soundVolume) {
+      soundVolume.addEventListener(
+        "input",
+        function () {
+          soundVolume.title =
+            "Remix Sound: " +
+            soundVolume.value +
+            "%";
+        }
+      );
+    }
+
+    console.log(
+      "✅ VIDEOAPNA MUSIC REMIX FRONTEND HANDLERS READY"
+    );
+  })();
+
+
+  /*
+   * ============================================================
+   * VIDEOAPNA COLLAB CAMERA
+   * Camera + Microphone + Front/Back Flip
+   * ============================================================
+   */
+
+  window.videoApnaCollabCameraStream = null;
+  window.videoApnaCollabFacingMode = "user";
+
+  window.videoApnaStopCollabCamera = function () {
+
+    const stream =
+      window.videoApnaCollabCameraStream;
+
+    if (stream) {
+      stream.getTracks().forEach(function (track) {
+        try {
+          track.stop();
+        } catch (e) {}
+      });
+    }
+
+    window.videoApnaCollabCameraStream = null;
+
+    const preview =
+      document.getElementById("collabCameraPreview");
+
+    if (preview) {
+      preview.srcObject = null;
+    }
+
+    console.log("📷 Collab Camera STOPPED");
+  };
+
+  window.videoApnaStartCollabCamera = async function () {
+
+    const preview =
+      document.getElementById("collabCameraPreview");
+
+    const status =
+      document.getElementById("collabRecordingStatus");
+
+    if (!preview) {
+      console.error(
+        "❌ collabCameraPreview नहीं मिला।"
+      );
+      return;
+    }
+
+    /*
+     * पुराना Camera पहले बंद करें।
+     */
+    window.videoApnaStopCollabCamera();
+
+    if (
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia
+    ) {
+      if (status) {
+        status.textContent =
+          "❌ इस device/browser में Camera उपलब्ध नहीं है।";
+      }
+      return;
+    }
+
+    try {
+
+      if (status) {
+        status.textContent =
+          "📷 Camera शुरू हो रहा है...";
+      }
+
+      const facing =
+        window.videoApnaCollabFacingMode || "user";
+
+      const stream =
+        await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: {
+              ideal: facing
+            },
+            width: {
+              ideal: 720
+            },
+            height: {
+              ideal: 1280
+            }
+          },
+          audio: true
+        });
+
+      window.videoApnaCollabCameraStream =
+        stream;
+
+      preview.srcObject = stream;
+
+      preview.muted = true;
+      preview.playsInline = true;
+
+      try {
+        await preview.play();
+      } catch (e) {
+        console.log(
+          "Camera preview autoplay blocked:",
+          e
+        );
+      }
+
+      if (status) {
+        status.textContent =
+          facing === "environment"
+            ? "📷 Back Camera चालू है • 🎙️ Mic चालू है"
+            : "🤳 Front Camera चालू है • 🎙️ Mic चालू है";
+      }
+
+      console.log(
+        "📷 COLLAB CAMERA STARTED:",
+        facing
+      );
+
+    } catch (error) {
+
+      console.error(
+        "❌ COLLAB CAMERA ERROR:",
+        error
+      );
+
+      if (status) {
+
+        if (
+          error &&
+          error.name === "NotAllowedError"
+        ) {
+          status.textContent =
+            "❌ Camera/Mic permission नहीं मिली। Android permission Allow करें।";
+        } else {
+          status.textContent =
+            "❌ Camera शुरू नहीं हो पाया: " +
+            (error.message || error.name || "Unknown error");
+        }
+      }
+    }
+  };
+
+  window.videoApnaFlipCollabCamera = async function () {
+
+    window.videoApnaCollabFacingMode =
+      window.videoApnaCollabFacingMode === "environment"
+        ? "user"
+        : "environment";
+
+    console.log(
+      "🔄 COLLAB CAMERA FLIP:",
+      window.videoApnaCollabFacingMode
+    );
+
+    await window.videoApnaStartCollabCamera();
+  };
+
+  /*
+   * Collab खुलते ही Camera अपने-आप शुरू करें।
+   */
+  (function () {
+
+    const originalOpen =
+      window.videoApnaOpenRemixCreator;
+
+    if (
+      typeof originalOpen !== "function"
+    ) {
+      console.warn(
+        "⚠️ Remix Creator opener अभी उपलब्ध नहीं है।"
+      );
+      return;
+    }
+
+    window.videoApnaOpenRemixCreator =
+      function (mode, sourceVideo) {
+
+        originalOpen(
+          mode,
+          sourceVideo
+        );
+
+        if (
+          String(mode || "").toLowerCase() ===
+          "collab"
+        ) {
+
+          setTimeout(
+            function () {
+
+              window.videoApnaStartCollabCamera();
+
+            },
+            250
+          );
+        }
+      };
+
+  })();
+
+  /*
+   * Camera Flip button
+   */
+  (function () {
+
+    const flipButton =
+      document.getElementById(
+        "collabFlipCameraButton"
+      );
+
+    if (!flipButton) {
+      return;
+    }
+
+    if (
+      flipButton.dataset.collabCameraBound === "1"
+    ) {
+      return;
+    }
+
+    flipButton.dataset.collabCameraBound = "1";
+
+    flipButton.addEventListener(
+      "click",
+      function (event) {
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        window.videoApnaFlipCollabCamera();
+
+      }
+    );
+
+  })();
+
+
+  /*
+   * ============================================================
+   * VIDEOAPNA COLLAB RECORDING
+   * Original Short + Camera = Side-by-Side
+   * Mic + Original Audio Volume Control
+   * ============================================================
+   */
+
+  window.videoApnaCollabRecorder = null;
+  window.videoApnaCollabChunks = [];
+  window.videoApnaCollabCanvas = null;
+  window.videoApnaCollabCanvasStream = null;
+  window.videoApnaCollabAudioContext = null;
+  window.videoApnaCollabSourceVideo = null;
+  window.videoApnaCollabSourceUrl = "";
+  window.videoApnaCollabSourceGain = null;
+  window.videoApnaCollabMicGain = null;
+
+  window.videoApnaGetCollabPlaybackUrl = async function (video) {
+
+    if (!video) {
+      return "";
+    }
+
+    if (video.vcdnPlaybackUrl) {
+      return String(video.vcdnPlaybackUrl);
+    }
+
+    if (video.vcdnVideoId) {
+
+      try {
+
+        const response = await fetch(
+          "https://embed.vcdn.me/api/bff/player-config/" +
+          encodeURIComponent(
+            String(video.vcdnVideoId)
+          )
+        );
+
+        if (response.ok) {
+
+          const config =
+            await response.json();
+
+          return String(
+            config.playbackUrl ||
+            config.streamUrl ||
+            (
+              config.playbackSources &&
+              config.playbackSources[0] &&
+              config.playbackSources[0].streamUrl
+            ) ||
+            ""
+          );
+        }
+
+      } catch (error) {
+
+        console.warn(
+          "⚠️ VCDN playback URL नहीं मिली:",
+          error
+        );
+
+      }
+    }
+
+    return String(
+      video.url ||
+      video.localUrl ||
+      ""
+    );
+  };
+
+  window.videoApnaCreateCollabSourceVideo =
+    async function (sourceVideo) {
+
+      const url =
+        await window.videoApnaGetCollabPlaybackUrl(
+          sourceVideo
+        );
+
+      if (!url) {
+        throw new Error(
+          "Original Short का video URL नहीं मिला।"
+        );
+      }
+
+      window.videoApnaCollabSourceUrl = url;
+
+      const video =
+        document.createElement("video");
+
+      video.crossOrigin = "anonymous";
+      video.playsInline = true;
+      video.preload = "auto";
+      video.muted = false;
+
+      video.src = url;
+
+      await new Promise(function (resolve, reject) {
+
+        let done = false;
+
+        function success() {
+          if (done) return;
+          done = true;
+          resolve();
+        }
+
+        function failure() {
+          if (done) return;
+          done = true;
+          reject(
+            new Error(
+              "Original Short video load नहीं हुआ।"
+            )
+          );
+        }
+
+        video.addEventListener(
+          "loadedmetadata",
+          success,
+          { once: true }
+        );
+
+        video.addEventListener(
+          "canplay",
+          success,
+          { once: true }
+        );
+
+        video.addEventListener(
+          "error",
+          failure,
+          { once: true }
+        );
+
+        setTimeout(function () {
+
+          if (!done) {
+            failure();
+          }
+
+        }, 15000);
+
+        video.load();
+
+      });
+
+      document.body.appendChild(video);
+
+      video.style.position = "fixed";
+      video.style.width = "1px";
+      video.style.height = "1px";
+      video.style.opacity = "0";
+      video.style.pointerEvents = "none";
+      video.style.left = "-10px";
+      video.style.top = "-10px";
+
+      window.videoApnaCollabSourceVideo = video;
+
+      return video;
+    };
+
+  window.videoApnaStopCollabRecording =
+    function () {
+
+      const recorder =
+        window.videoApnaCollabRecorder;
+
+      if (
+        recorder &&
+        recorder.state !== "inactive"
+      ) {
+
+        recorder.stop();
+
+        console.log(
+          "🔴 Collab Recording STOP requested"
+        );
+
+      }
+
+    };
+
+  window.videoApnaStartCollabRecording =
+    async function () {
+
+      const status =
+        document.getElementById(
+          "collabRecordingStatus"
+        );
+
+      const recordButton =
+        document.getElementById(
+          "collabRecordButton"
+        );
+
+      const preview =
+        document.getElementById(
+          "collabCameraPreview"
+        );
+
+      const recordedPreview =
+        document.getElementById(
+          "collabRecordedPreview"
+        );
+
+      const publishButton =
+        document.getElementById(
+          "collabPublishButton"
+        );
+
+      const originalVolume =
+        document.getElementById(
+          "collabOriginalVolume"
+        );
+
+      const micVolume =
+        document.getElementById(
+          "collabMicVolume"
+        );
+
+      const sourceVideo =
+        window.videoApnaRemixState &&
+        window.videoApnaRemixState.sourceVideo;
+
+      if (!sourceVideo) {
+
+        if (status) {
+          status.textContent =
+            "❌ Original Short नहीं मिला।";
+        }
+
+        return;
+      }
+
+      if (
+        !window.videoApnaCollabCameraStream
+      ) {
+
+        await window.videoApnaStartCollabCamera();
+
+      }
+
+      const cameraStream =
+        window.videoApnaCollabCameraStream;
+
+      if (!cameraStream) {
+
+        if (status) {
+          status.textContent =
+            "❌ Camera/Mic शुरू नहीं है।";
+        }
+
+        return;
+      }
+
+      try {
+
+        if (status) {
+          status.textContent =
+            "⏳ Original Short तैयार हो रहा है...";
+        }
+
+        const source =
+          await window.videoApnaCreateCollabSourceVideo(
+            sourceVideo
+          );
+
+        const canvas =
+          document.createElement("canvas");
+
+        /*
+         * Shorts के लिए vertical canvas।
+         */
+        canvas.width = 720;
+        canvas.height = 1280;
+
+        const ctx =
+          canvas.getContext("2d");
+
+        if (!ctx) {
+          throw new Error(
+            "Canvas उपलब्ध नहीं है।"
+          );
+        }
+
+        window.videoApnaCollabCanvas =
+          canvas;
+
+        /*
+         * Camera video size.
+         */
+        const cameraWidth =
+          preview.videoWidth || 720;
+
+        const cameraHeight =
+          preview.videoHeight || 1280;
+
+        /*
+         * Canvas को दो vertical हिस्सों में बाँटें।
+         */
+        const halfWidth = 360;
+
+        /*
+         * AudioContext:
+         *
+         * Original Short audio
+         * +
+         * User Mic
+         */
+        const AudioContextClass =
+          window.AudioContext ||
+          window.webkitAudioContext;
+
+        if (!AudioContextClass) {
+          throw new Error(
+            "AudioContext उपलब्ध नहीं है।"
+          );
+        }
+
+        const audioContext =
+          new AudioContextClass();
+
+        window.videoApnaCollabAudioContext =
+          audioContext;
+
+        if (
+          audioContext.state === "suspended"
+        ) {
+          await audioContext.resume();
+        }
+
+        const destination =
+          audioContext.createMediaStreamDestination();
+
+        /*
+         * Original Short audio.
+         */
+        let sourceAudioNode = null;
+
+        try {
+
+          sourceAudioNode =
+            audioContext.createMediaElementSource(
+              source
+            );
+
+        } catch (error) {
+
+          console.warn(
+            "⚠️ Original audio node नहीं बना:",
+            error
+          );
+
+        }
+
+        /*
+         * Original volume.
+         */
+        const originalGain =
+          audioContext.createGain();
+
+        /*
+         * Mic volume.
+         */
+        const micGain =
+          audioContext.createGain();
+
+        window.videoApnaCollabSourceGain =
+          originalGain;
+
+        window.videoApnaCollabMicGain =
+          micGain;
+
+        originalGain.gain.value =
+          Math.max(
+            0,
+            Math.min(
+              1,
+              Number(
+                originalVolume ?
+                originalVolume.value :
+                100
+              ) / 100
+            )
+          );
+
+        micGain.gain.value =
+          Math.max(
+            0,
+            Math.min(
+              1,
+              Number(
+                micVolume ?
+                micVolume.value :
+                100
+              ) / 100
+            )
+          );
+
+        if (sourceAudioNode) {
+
+          sourceAudioNode.connect(
+            originalGain
+          );
+
+          originalGain.connect(
+            destination
+          );
+
+        }
+
+        /*
+         * Camera microphone.
+         */
+        const micStream =
+          new MediaStream(
+            cameraStream.getAudioTracks()
+          );
+
+        if (micStream.getAudioTracks().length) {
+
+          const micSource =
+            audioContext.createMediaStreamSource(
+              micStream
+            );
+
+          micSource.connect(
+            micGain
+          );
+
+          micGain.connect(
+            destination
+          );
+
+        }
+
+        /*
+         * Canvas video stream.
+         */
+        const canvasStream =
+          canvas.captureStream(30);
+
+        window.videoApnaCollabCanvasStream =
+          canvasStream;
+
+        /*
+         * Canvas video + mixed audio.
+         */
+        const mixedStream =
+          new MediaStream();
+
+        canvasStream
+          .getVideoTracks()
+          .forEach(function (track) {
+
+            mixedStream.addTrack(track);
+
+          });
+
+        destination.stream
+          .getAudioTracks()
+          .forEach(function (track) {
+
+            mixedStream.addTrack(track);
+
+          });
+
+        let mimeType = "";
+
+        if (
+          MediaRecorder.isTypeSupported(
+            "video/webm;codecs=vp9,opus"
+          )
+        ) {
+
+          mimeType =
+            "video/webm;codecs=vp9,opus";
+
+        } else if (
+          MediaRecorder.isTypeSupported(
+            "video/webm;codecs=vp8,opus"
+          )
+        ) {
+
+          mimeType =
+            "video/webm;codecs=vp8,opus";
+
+        } else if (
+          MediaRecorder.isTypeSupported(
+            "video/webm"
+          )
+        ) {
+
+          mimeType =
+            "video/webm";
+
+        }
+
+        const recorder =
+          mimeType
+            ? new MediaRecorder(
+                mixedStream,
+                {
+                  mimeType: mimeType
+                }
+              )
+            : new MediaRecorder(
+                mixedStream
+              );
+
+        window.videoApnaCollabRecorder =
+          recorder;
+
+        window.videoApnaCollabChunks =
+          [];
+
+        recorder.ondataavailable =
+          function (event) {
+
+            if (
+              event.data &&
+              event.data.size > 0
+            ) {
+
+              window.videoApnaCollabChunks.push(
+                event.data
+              );
+
+            }
+
+          };
+
+        recorder.onerror =
+          function (event) {
+
+            console.error(
+              "❌ COLLAB RECORDER ERROR:",
+              event
+            );
+
+            if (status) {
+              status.textContent =
+                "❌ Recording में error आया।";
+            }
+
+          };
+
+        recorder.onstop =
+          function () {
+
+            try {
+
+              const blob =
+                new Blob(
+                  window.videoApnaCollabChunks,
+                  {
+                    type:
+                      mimeType ||
+                      "video/webm"
+                  }
+                );
+
+              window.videoApnaCollabRecordingBlob =
+                blob;
+
+              const url =
+                URL.createObjectURL(
+                  blob
+                );
+
+              if (recordedPreview) {
+
+                recordedPreview.src =
+                  url;
+
+                recordedPreview.classList.remove(
+                  "hidden"
+                );
+
+                recordedPreview.controls =
+                  true;
+
+                recordedPreview.muted =
+                  false;
+
+              }
+
+              if (publishButton) {
+                publishButton.classList.remove(
+                  "hidden"
+                );
+              }
+
+              if (recordButton) {
+                recordButton.textContent =
+                  "🔴 Recording शुरू करें";
+              }
+
+              if (status) {
+
+                status.textContent =
+                  "✅ Recording तैयार है। अब Preview करें और Publish करें।";
+
+              }
+
+              try {
+                source.pause();
+              } catch (e) {}
+
+              try {
+                audioContext.close();
+              } catch (e) {}
+
+              console.log(
+                "✅ COLLAB RECORDING READY:",
+                blob.size
+              );
+
+            } catch (error) {
+
+              console.error(
+                "❌ Collab recording finalize error:",
+                error
+              );
+
+              if (status) {
+                status.textContent =
+                  "❌ Recording तैयार नहीं हो पाई।";
+              }
+
+            }
+
+          };
+
+        /*
+         * Canvas drawing loop.
+         */
+        let drawing = true;
+
+        function drawFrame() {
+
+          if (!drawing) {
+            return;
+          }
+
+          try {
+
+            ctx.clearRect(
+              0,
+              0,
+              canvas.width,
+              canvas.height
+            );
+
+            /*
+             * Left:
+             * Original Short
+             */
+            ctx.save();
+
+            ctx.beginPath();
+
+            ctx.rect(
+              0,
+              0,
+              halfWidth,
+              canvas.height
+            );
+
+            ctx.clip();
+
+            ctx.fillStyle = "#000";
+
+            ctx.fillRect(
+              0,
+              0,
+              halfWidth,
+              canvas.height
+            );
+
+            if (
+              source.readyState >= 2
+            ) {
+
+              const sw =
+                source.videoWidth || 720;
+
+              const sh =
+                source.videoHeight || 1280;
+
+              const scale =
+                Math.max(
+                  halfWidth / sw,
+                  canvas.height / sh
+                );
+
+              const dw =
+                sw * scale;
+
+              const dh =
+                sh * scale;
+
+              ctx.drawImage(
+                source,
+                (halfWidth - dw) / 2,
+                (canvas.height - dh) / 2,
+                dw,
+                dh
+              );
+
+            }
+
+            ctx.restore();
+
+            /*
+             * Right:
+             * User Camera
+             */
+            ctx.save();
+
+            ctx.beginPath();
+
+            ctx.rect(
+              halfWidth,
+              0,
+              halfWidth,
+              canvas.height
+            );
+
+            ctx.clip();
+
+            ctx.fillStyle = "#000";
+
+            ctx.fillRect(
+              halfWidth,
+              0,
+              halfWidth,
+              canvas.height
+            );
+
+            if (
+              preview &&
+              preview.readyState >= 2
+            ) {
+
+              const cw =
+                preview.videoWidth ||
+                cameraWidth;
+
+              const ch =
+                preview.videoHeight ||
+                cameraHeight;
+
+              const scale =
+                Math.max(
+                  halfWidth / cw,
+                  canvas.height / ch
+                );
+
+              const dw =
+                cw * scale;
+
+              const dh =
+                ch * scale;
+
+              /*
+               * Mirror front camera.
+               */
+              if (
+                window.videoApnaCollabFacingMode ===
+                "user"
+              ) {
+
+                ctx.translate(
+                  halfWidth * 2,
+                  0
+                );
+
+                ctx.scale(
+                  -1,
+                  1
+                );
+
+              }
+
+              ctx.drawImage(
+                preview,
+                halfWidth +
+                  (halfWidth - dw) / 2,
+                (canvas.height - dh) / 2,
+                dw,
+                dh
+              );
+
+            }
+
+            ctx.restore();
+
+            /*
+             * बीच में divider.
+             */
+            ctx.fillStyle =
+              "rgba(255,255,255,.85)";
+
+            ctx.fillRect(
+              halfWidth - 2,
+              0,
+              4,
+              canvas.height
+            );
+
+          } catch (error) {
+
+            console.warn(
+              "Canvas draw error:",
+              error
+            );
+
+          }
+
+          requestAnimationFrame(
+            drawFrame
+          );
+        }
+
+        /*
+         * Volume sliders live update.
+         */
+        if (originalVolume) {
+
+          originalVolume.oninput =
+            function () {
+
+              if (
+                window.videoApnaCollabSourceGain
+              ) {
+
+                window.videoApnaCollabSourceGain.gain.value =
+                  Number(
+                    originalVolume.value
+                  ) / 100;
+
+              }
+
+            };
+
+        }
+
+        if (micVolume) {
+
+          micVolume.oninput =
+            function () {
+
+              if (
+                window.videoApnaCollabMicGain
+              ) {
+
+                window.videoApnaCollabMicGain.gain.value =
+                  Number(
+                    micVolume.value
+                  ) / 100;
+
+              }
+
+            };
+
+        }
+
+        source.currentTime = 0;
+
+        await source.play();
+
+        drawing = true;
+
+        drawFrame();
+
+        recorder.start(250);
+
+        if (recordButton) {
+          recordButton.textContent =
+            "⏹️ Recording रोकें";
+        }
+
+        if (status) {
+          status.textContent =
+            "🔴 Recording चल रही है...";
+        }
+
+        console.log(
+          "🔴 COLLAB RECORDING STARTED"
+        );
+
+        /*
+         * Button दोबारा दबाने पर stop।
+         */
+        if (recordButton) {
+
+          recordButton.onclick =
+            function () {
+
+              if (
+                recorder.state === "recording"
+              ) {
+
+                drawing = false;
+
+                window.videoApnaStopCollabRecording();
+
+              } else {
+
+                window.videoApnaStartCollabRecording();
+
+              }
+
+            };
+
+        }
+
+      } catch (error) {
+
+        console.error(
+          "❌ COLLAB RECORDING START ERROR:",
+          error
+        );
+
+        if (status) {
+          status.textContent =
+            "❌ Recording शुरू नहीं हुई: " +
+            (
+              error.message ||
+              "Unknown error"
+            );
+        }
+
+      }
+
+    };
+
+  /*
+   * ========================================================
+   * 🤝 VIDEOAPNA COLLAB CAMERA + PUBLISH
+   * ========================================================
+   */
+
+  (function () {
+
+    const startCameraButton =
+      document.getElementById(
+        "collabStartCameraButton"
+      );
+
+    if (
+      startCameraButton &&
+      startCameraButton.dataset.collabCameraBound !== "1"
+    ) {
+
+      startCameraButton.dataset.collabCameraBound = "1";
+
+      startCameraButton.addEventListener(
+        "click",
+        async function (event) {
+
+          event.preventDefault();
+          event.stopPropagation();
+
+          if (
+            typeof window.videoApnaStartCollabCamera ===
+            "function"
+          ) {
+
+            await window.videoApnaStartCollabCamera();
+
+          }
+
+        }
+      );
+
+    }
+
+
+    const publishButton =
+      document.getElementById(
+        "collabPublishButton"
+      );
+
+    if (
+      !publishButton ||
+      publishButton.dataset.collabPublishBound === "1"
+    ) {
+      return;
+    }
+
+    publishButton.dataset.collabPublishBound = "1";
+
+    publishButton.addEventListener(
+      "click",
+      async function (event) {
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const message =
+          document.getElementById(
+            "collabMessage"
+          );
+
+        const blob =
+          window.videoApnaCollabRecordingBlob;
+
+        const state =
+          window.videoApnaRemixState || {};
+
+        const sourceVideo =
+          state.sourceVideo || null;
+
+        const sourceShortId =
+          String(
+            state.sourceShortId ||
+            sourceVideo?.id ||
+            ""
+          ).trim().replace(/^va-/, "");
+
+        if (!sourceShortId) {
+
+          if (message) {
+            message.textContent =
+              "❌ Original Short नहीं मिला।";
+          }
+
+          return;
+        }
+
+        if (!blob || !blob.size) {
+
+          if (message) {
+            message.textContent =
+              "❌ पहले Collab Recording तैयार करें।";
+          }
+
+          return;
+        }
+
+        const originalVolume =
+          Math.max(
+            0,
+            Math.min(
+              100,
+              Number(
+                document.getElementById(
+                  "collabOriginalVolume"
+                )?.value || 100
+              )
+            )
+          );
+
+        const micVolume =
+          Math.max(
+            0,
+            Math.min(
+              100,
+              Number(
+                document.getElementById(
+                  "collabMicVolume"
+                )?.value || 100
+              )
+            )
+          );
+
+        const title =
+          "Collab - " +
+          String(
+            sourceVideo?.title ||
+            "VideoApna Short"
+          ).trim();
+
+        const formData =
+          new FormData();
+
+        formData.append(
+          "sourceShortId",
+          sourceShortId
+        );
+
+        formData.append(
+          "title",
+          title
+        );
+
+        formData.append(
+          "description",
+          "VideoApna Collab Short"
+        );
+
+        formData.append(
+          "originalVolume",
+          String(originalVolume)
+        );
+
+        formData.append(
+          "micVolume",
+          String(micVolume)
+        );
+
+        formData.append(
+          "video",
+          blob,
+          "videoapna-collab.webm"
+        );
+
+        const oldText =
+          publishButton.textContent;
+
+        publishButton.disabled = true;
+        publishButton.textContent =
+          "⏳ Collab Publish हो रहा है...";
+
+        if (message) {
+          message.textContent =
+            "⏳ आपका Collab Short तैयार किया जा रहा है...";
+        }
+
+        try {
+
+          const response =
+            await fetch(
+              "/api/remix-collab",
+              {
+                method: "POST",
+                body: formData,
+                credentials: "same-origin"
+              }
+            );
+
+          let data = null;
+
+          try {
+            data = await response.json();
+          } catch {
+            data = null;
+          }
+
+          if (
+            !response.ok ||
+            !data ||
+            data.success !== true
+          ) {
+
+            throw new Error(
+              data?.message ||
+              "Collab Publish नहीं हो पाया।"
+            );
+
+          }
+
+          console.log(
+            "✅ VIDEOAPNA COLLAB PUBLISHED:",
+            data.video
+          );
+
+          /*
+           * Local lists में नया Short तुरंत जोड़ें।
+           */
+          if (
+            data.video &&
+            Array.isArray(window.serverVideos)
+          ) {
+            window.serverVideos.unshift(
+              data.video
+            );
+          }
+
+          if (
+            data.video &&
+            Array.isArray(window.videoApnaVideos)
+          ) {
+            window.videoApnaVideos.unshift(
+              data.video
+            );
+          }
+
+          if (message) {
+            message.textContent =
+              "✅ Collab Short सफलतापूर्वक Publish हो गया!";
+          }
+
+          /*
+           * Camera बंद करें।
+           */
+          if (
+            typeof window.videoApnaStopCollabCamera ===
+            "function"
+          ) {
+            window.videoApnaStopCollabCamera();
+          }
+
+          /*
+           * Modal बंद करें।
+           */
+          const modal =
+            document.getElementById(
+              "videoApnaRemixCreator"
+            );
+
+          if (modal) {
+            modal.classList.add("hidden");
+          }
+
+          /*
+           * Recording state साफ करें।
+           */
+          window.videoApnaCollabRecordingBlob = null;
+
+          const recordedPreview =
+            document.getElementById(
+              "collabRecordedPreview"
+            );
+
+          if (recordedPreview) {
+            recordedPreview.pause();
+
+            if (recordedPreview.src) {
+              try {
+                URL.revokeObjectURL(
+                  recordedPreview.src
+                );
+              } catch {}
+            }
+
+            recordedPreview.removeAttribute("src");
+            recordedPreview.classList.add("hidden");
+          }
+
+          publishButton.classList.add("hidden");
+
+          /*
+           * Server से fresh Shorts list।
+           */
+          if (
+            typeof window.loadVideos ===
+            "function"
+          ) {
+            try {
+              await window.loadVideos();
+            } catch (refreshError) {
+              console.warn(
+                "⚠️ Shorts refresh failed:",
+                refreshError
+              );
+            }
+          }
+
+        } catch (error) {
+
+          console.error(
+            "❌ COLLAB PUBLISH ERROR:",
+            error
+          );
+
+          if (message) {
+            message.textContent =
+              "❌ " +
+              (
+                error.message ||
+                "Collab Publish में समस्या हुई।"
+              );
+          }
+
+        } finally {
+
+          publishButton.disabled = false;
+          publishButton.textContent =
+            oldText ||
+            "🚀 Collab Short Publish करें";
+
+        }
+
+      }
+    );
+
+  })();
+
+
+  /*
+   * पहली बार Recording button bind करें।
+   */
+  (function () {
+
+    const button =
+      document.getElementById(
+        "collabRecordButton"
+      );
+
+    if (!button) {
+      return;
+    }
+
+    if (
+      button.dataset.collabRecorderBound === "1"
+    ) {
+      return;
+    }
+
+    button.dataset.collabRecorderBound = "1";
+
+    button.addEventListener(
+      "click",
+      function (event) {
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (
+          window.videoApnaCollabRecorder &&
+          window.videoApnaCollabRecorder.state ===
+            "recording"
+        ) {
+
+          window.videoApnaStopCollabRecording();
+
+        } else {
+
+          window.videoApnaStartCollabRecording();
+
+        }
+
+      }
+    );
+
+  })();
+
+window.videoApnaLoadShorts =
     loadShortsFeed;
 
   // Shorts अब Home खुलते ही अपने-आप नहीं चलेगा।
@@ -10614,5 +13236,70 @@ document.addEventListener(
 
   /* Upload खुलने पर Long Video default रहेगा */
   setMode("long");
+
+})();
+
+/* =========================================================
+   VIDEOAPNA ANDROID FILE PICKER FIX
+   Visible Button -> Hidden File Input
+========================================================= */
+(function () {
+
+  const photoButton =
+    document.getElementById("photoSelectButton");
+
+  const photoInput =
+    document.getElementById("photoVideoInput");
+
+  const videoButton =
+    document.getElementById("videoSelectButton");
+
+  const videoInput =
+    document.getElementById("videoFile");
+
+  if (photoButton && photoInput) {
+    photoButton.addEventListener("click", function () {
+      console.log("PHOTO FILE PICKER OPEN");
+      photoInput.click();
+    });
+  }
+
+  if (videoButton && videoInput) {
+    videoButton.addEventListener("click", function () {
+      console.log("VIDEO FILE PICKER OPEN");
+      videoInput.click();
+    });
+  }
+
+})();
+
+/* =========================================================
+   VIDEOAPNA PROFILE PHOTO FILE PICKER
+========================================================= */
+(function () {
+
+  const button =
+    document.getElementById("profilePhotoButton");
+
+  const input =
+    document.getElementById("profilePhotoInput");
+
+  if (!button || !input) {
+    console.log("PROFILE PHOTO PICKER: ELEMENT MISSING");
+    return;
+  }
+
+  if (!button.dataset.filePickerBound) {
+
+    button.dataset.filePickerBound = "1";
+
+    button.addEventListener("click", function () {
+
+      console.log("PROFILE PHOTO FILE PICKER OPEN");
+
+      input.click();
+
+    });
+  }
 
 })();
