@@ -10526,3 +10526,93 @@ document.addEventListener(
     initPublicAccount;
 
 })();
+
+/* =========================================================
+   VIDEOAPNA LONG VIDEO / PHOTO SHORT MODE
+   ========================================================= */
+(function () {
+
+  const longBtn =
+    document.getElementById("longVideoModeBtn");
+
+  const photoBtn =
+    document.getElementById("photoVideoModeBtn");
+
+  const photoMode =
+    document.getElementById("photoVideoMode");
+
+  const uploadBox =
+    document.querySelector("#uploadModal .upload-box");
+
+  if (!longBtn || !photoBtn || !photoMode || !uploadBox) {
+    console.log("UPLOAD MODE SELECTOR: ELEMENT MISSING");
+    return;
+  }
+
+  /*
+   * Long Video के पुराने controls.
+   * Photo Mode के अंदर मौजूद controls को छोड़कर
+   * upload-header से नीचे के long-video elements छिपाएँ/दिखाएँ।
+   */
+  const longElements = [
+    uploadBox.querySelector(".upload-header"),
+    document.getElementById("videoFile")?.closest(".file-label"),
+    document.getElementById("videoPreview"),
+    document.getElementById("uploadTitle"),
+    document.getElementById("uploadDescription"),
+    document.getElementById("uploadCategory"),
+    document.getElementById("templatePicker"),
+    document.getElementById("soundPicker"),
+    document.getElementById("publishBtn"),
+    document.getElementById("uploadMessage")
+  ].filter(Boolean);
+
+  function setMode(mode) {
+
+    const photo =
+      mode === "photo";
+
+    photoMode.classList.toggle(
+      "hidden",
+      !photo
+    );
+
+    longElements.forEach(function (element) {
+      element.style.display =
+        photo ? "none" : "";
+    });
+
+    longBtn.classList.toggle(
+      "active",
+      !photo
+    );
+
+    photoBtn.classList.toggle(
+      "active",
+      photo
+    );
+
+    console.log(
+      "UPLOAD MODE:",
+      photo ? "PHOTO SHORT" : "LONG VIDEO"
+    );
+  }
+
+  longBtn.addEventListener(
+    "click",
+    function () {
+      setMode("long");
+    }
+  );
+
+  photoBtn.addEventListener(
+    "click",
+    function () {
+      setMode("photo");
+    }
+  );
+
+  /* Upload खुलने पर Long Video default रहेगा */
+  setMode("long");
+
+})();

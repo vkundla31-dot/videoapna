@@ -2317,3 +2317,182 @@ body.shorts-mode .bottom-nav {
 }
 
 
+
+/* =========================================================
+   VIDEOAPNA UPLOAD + SOUND MOBILE SCROLL FIX
+   ========================================================= */
+
+/* Upload modal को पूरे viewport के अंदर रखें */
+#uploadModal {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100dvh !important;
+  overflow: hidden !important;
+  display: flex !important;
+  align-items: flex-end !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* Upload box खुद scroll होगा */
+#uploadModal .upload-box {
+  width: 100% !important;
+  max-width: 600px !important;
+  height: auto !important;
+  max-height: 92dvh !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior: contain !important;
+  box-sizing: border-box !important;
+  padding: 20px 16px 40px !important;
+}
+
+/* Sound picker */
+#uploadModal .sound-picker {
+  position: relative !important;
+  width: 100% !important;
+}
+
+/* Sound panel */
+#uploadModal .sound-panel {
+  position: relative !important;
+  width: 100% !important;
+  max-height: 280px !important;
+  margin-top: 10px !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  border: 1px solid #ddd !important;
+  border-radius: 14px !important;
+  background: #fff !important;
+}
+
+/* Sound panel header हमेशा ऊपर रहे */
+#uploadModal .sound-panel-header {
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 5 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  padding: 12px !important;
+  background: #fff !important;
+  border-bottom: 1px solid #eee !important;
+}
+
+/* केवल sounds की list scroll होगी */
+#uploadModal .sound-list {
+  max-height: 220px !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  padding: 8px !important;
+  box-sizing: border-box !important;
+}
+
+/* प्रत्येक sound */
+#uploadModal .sound-item {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  margin-bottom: 8px !important;
+  padding: 10px !important;
+  border: 1px solid #eee !important;
+  border-radius: 12px !important;
+  background: #fafafa !important;
+}
+
+/* Publish button को नीचे पर्याप्त जगह */
+#uploadModal #publishBtn {
+  width: 100% !important;
+  min-height: 50px !important;
+  margin-top: 16px !important;
+  margin-bottom: 8px !important;
+  display: block !important;
+}
+
+/* Android छोटे screen के लिए */
+@media (max-height: 700px) {
+  #uploadModal .upload-box {
+    max-height: 88dvh !important;
+    padding-bottom: 50px !important;
+  }
+
+  #uploadModal .sound-panel {
+    max-height: 230px !important;
+  }
+
+  #uploadModal .sound-list {
+    max-height: 175px !important;
+  }
+}
+
+/* बहुत छोटी screen */
+@media (max-height: 600px) {
+  #uploadModal .upload-box {
+    max-height: 86dvh !important;
+    padding-top: 12px !important;
+    padding-bottom: 60px !important;
+  }
+
+  #uploadModal .sound-panel {
+    max-height: 200px !important;
+  }
+
+  #uploadModal .sound-list {
+    max-height: 145px !important;
+  }
+}
+
+
+/* =========================================================
+   VIDEOAPNA FINAL UPLOAD MODAL HIDDEN FIX
+   hidden होने पर upload modal हमेशा बंद रहे
+   ========================================================= */
+#uploadModal.hidden {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+#uploadModal:not(.hidden) {
+  display: flex !important;
+  pointer-events: auto !important;
+}
+
+/* =========================================================
+   VIDEOAPNA UPLOAD MODE SELECTOR
+   ========================================================= */
+
+.upload-mode-selector {
+  margin-bottom: 18px;
+}
+
+.upload-mode-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.upload-mode-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.upload-mode-btn {
+  flex: 1;
+  border: 1px solid #ddd;
+  border-radius: 13px;
+  padding: 13px 10px;
+  background: #f5f5f5;
+  color: #222;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.upload-mode-btn.active {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}

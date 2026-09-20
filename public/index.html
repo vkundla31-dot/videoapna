@@ -401,8 +401,35 @@
 <div id="uploadModal" class="modal hidden">
   <div class="upload-box">
 
+    <!-- VIDEOAPNA UPLOAD MODE SELECTOR -->
+    <div id="uploadModeSelector" class="upload-mode-selector">
+
+      <div class="upload-mode-title">
+        📤 क्या Upload करना है?
+      </div>
+
+      <div class="upload-mode-buttons">
+
+        <button
+          type="button"
+          id="longVideoModeBtn"
+          class="upload-mode-btn active">
+          🎬 Long Video
+        </button>
+
+        <button
+          type="button"
+          id="photoVideoModeBtn"
+          class="upload-mode-btn">
+          📷 Photo Short
+        </button>
+
+      </div>
+
+    </div>
+
 <!-- VIDEOAPNA PHOTO → VIDEO MODE -->
-<div id="photoVideoMode" class="photo-video-mode">
+<div id="photoVideoMode" class="photo-video-mode hidden">
 
   <div class="photo-video-title">
     📷 फोटो से Automatic Short Video
