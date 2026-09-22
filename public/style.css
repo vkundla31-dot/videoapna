@@ -2510,3 +2510,114 @@ body.shorts-mode .bottom-nav {
   position: relative !important;
   z-index: 1000002 !important;
 }
+
+/* =========================================================
+   VIDEOAPNA COLLAB CREATOR
+   Original Short LEFT 50% + Camera RIGHT 50%
+   ========================================================= */
+
+#collabRemixCreator {
+  width: 100%;
+}
+
+#collabRemixCreator .collab-preview {
+  width: 100%;
+  display: flex;
+  gap: 8px;
+  background: #111;
+  border-radius: 16px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+#collabRemixCreator .collab-source,
+#collabRemixCreator .collab-camera {
+  position: relative;
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  aspect-ratio: 9 / 16;
+  background: #000;
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+#collabRemixCreator .collab-label {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 20;
+  color: #fff;
+  background: rgba(0,0,0,.65);
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+#collabRemixCreator .collab-source-player,
+#collabRemixCreator .collab-source-player video,
+#collabRemixCreator .collab-source-player iframe {
+  width: 100%;
+  height: 100%;
+  display: block;
+  border: 0;
+  object-fit: cover;
+}
+
+#collabRemixCreator #collabCameraPreview {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  object-position: center center;
+  background: #000;
+}
+
+#collabRemixCreator .collab-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+#collabRemixCreator .collab-controls button {
+  flex: 1;
+  min-height: 52px;
+  margin-bottom: 0;
+}
+
+#collabRemixCreator .remix-volume-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+#collabRemixCreator .remix-volume-row label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+#collabRemixCreator .remix-volume-row input[type="range"] {
+  flex: 1;
+}
+
+@media (max-width: 420px) {
+  #collabRemixCreator .collab-preview {
+    gap: 4px;
+  }
+
+  #collabRemixCreator .collab-label {
+    font-size: 10px;
+    padding: 5px;
+  }
+
+  #collabRemixCreator .collab-controls {
+    flex-direction: column;
+  }
+}

@@ -1353,20 +1353,7 @@ function normalizeVideoApnaVideo(video) {
       video.thumbnail ||
       "https://dummyimage.com/640x360/111/fff.png&text=VideoApna",
     url: video.url || "",
-    embedUrl:
-      video.embedUrl ||
-      video.vcdnEmbedUrl ||
-      "",
-    vcdnEmbedUrl:
-      video.vcdnEmbedUrl ||
-      video.embedUrl ||
-      "",
-    vcdnPlaybackUrl:
-      video.vcdnPlaybackUrl ||
-      "",
-    vcdnVideoId:
-      video.vcdnVideoId ||
-      "",
+    embedUrl: "",
     views: video.views || "0 views",
     viewCount: Number(video.viewCount || 0),
     likes: Number(video.likes || 0),
@@ -5878,18 +5865,12 @@ window.videoApnaSelectedSound = null;
 
       selectedSound = null;
 
-      // Long Video का global selected sound भी clear करें
-      window.videoApnaSelectedSound = null;
-      window.videoApnaPhoneSound = null;
-
       selectedBox.classList.add("hidden");
 
       selectedTitle.textContent =
         "कोई Sound नहीं चुना";
 
-      console.log(
-        "LONG VIDEO SOUND CLEARED"
-      );
+      console.log("SOUND REMOVED");
 
     });
   }
@@ -5903,14 +5884,9 @@ window.videoApnaSelectedSound = null;
 
 (function () {
 
-  const input =
-    document.getElementById("phoneSoundInput");
-
-  const selectedBox =
-    document.getElementById("selectedSound");
-
-  const selectedTitle =
-    document.getElementById("selectedSoundTitle");
+  const input = document.getElementById("phoneSoundInput");
+  const selectedBox = document.getElementById("selectedSound");
+  const selectedTitle = document.getElementById("selectedSoundTitle");
 
   if (!input) {
     console.log("PHONE SOUND: INPUT MISSING");
@@ -5919,36 +5895,26 @@ window.videoApnaSelectedSound = null;
 
   let phoneAudio = null;
 
-  input.addEventListener("change", async function () {
+  input.addEventListener("change", function () {
 
-    const file =
-      this.files && this.files[0];
+    const file = this.files && this.files[0];
 
     if (!file) return;
 
     if (!file.type.startsWith("audio/")) {
-
       alert("कृपया Audio file चुनें।");
-
       input.value = "";
-
       return;
     }
 
     if (phoneAudio) {
-
-      try {
-        phoneAudio.pause();
-      } catch {}
-
+      phoneAudio.pause();
       phoneAudio = null;
     }
 
-    const audioUrl =
-      URL.createObjectURL(file);
+    const audioUrl = URL.createObjectURL(file);
 
-    phoneAudio =
-      new Audio(audioUrl);
+    phoneAudio = new Audio(audioUrl);
 
     if (selectedBox) {
       selectedBox.classList.remove("hidden");
@@ -5956,495 +5922,41 @@ window.videoApnaSelectedSound = null;
 
     if (selectedTitle) {
       selectedTitle.textContent =
-        "⏳ Music upload हो रहा है...";
+        "📱 " + file.name;
     }
 
-    try {
+    phoneAudio.addEventListener("ended", function () {
+      console.log("PHONE SOUND PREVIEW ENDED");
+    });
 
-      const formData =
-        new FormData();
-
-      formData.append(
-        "audio",
-        file
-      );
-
-      formData.append(
-        "title",
-        file.name
-      );
-
-      const response =
-        await fetch(
-          "/api/private-sound",
-          {
-            method: "POST",
-            body: formData
-          }
+    phoneAudio.play()
+      .then(function () {
+        console.log(
+          "PHONE SOUND PREVIEW PLAYING:",
+          file.name
         );
-
-      const result =
-        await response.json();
-
-      if (!response.ok || !result.success) {
-
-        throw new Error(
-          result.message ||
-          "Music upload नहीं हुआ।"
+      })
+      .catch(function (error) {
+        console.log(
+          "PHONE SOUND PREVIEW READY:",
+          error
         );
-      }
+      });
 
-      window.videoApnaPhoneSound = {
-        file: file,
-        url: audioUrl,
-        audio: phoneAudio
-      };
+    window.videoApnaPhoneSound = {
+      file: file,
+      url: audioUrl,
+      audio: phoneAudio
+    };
 
-      window.videoApnaSelectedSound =
-        result.sound;
-
-      if (selectedTitle) {
-        selectedTitle.textContent =
-          "📱 " +
-          (result.sound.title || file.name);
-      }
-
-      console.log(
-        "PHONE SOUND UPLOADED:",
-        result.sound
-      );
-
-      phoneAudio
-        .play()
-        .then(() => {
-          console.log(
-            "PHONE SOUND PREVIEW PLAYING:",
-            file.name
-          );
-        })
-        .catch(error => {
-          console.log(
-            "PHONE SOUND PREVIEW READY:",
-            error
-          );
-        });
-
-    } catch (error) {
-
-      console.error(
-        "PHONE SOUND ERROR:",
-        error
-      );
-
-      window.videoApnaPhoneSound =
-        null;
-
-      window.videoApnaSelectedSound =
-        null;
-
-      if (selectedBox) {
-        selectedBox.classList.add("hidden");
-      }
-
-      if (selectedTitle) {
-        selectedTitle.textContent =
-          "कोई Sound नहीं चुना";
-      }
-
-      alert(
-        "❌ Phone Music upload नहीं हुआ:\n" +
-        error.message
-      );
-
-      input.value = "";
-    }
+    console.log(
+      "PHONE SOUND SELECTED:",
+      file.name
+    );
 
   });
 
 })();
-
-// ============================================================
-// LONG VIDEO MIC RECORDING
-// ============================================================
-
-(function () {
-
-  const micRecordBtn =
-    document.getElementById("micRecordBtn");
-
-  const micStatus =
-    document.getElementById("micStatus");
-
-  if (!micRecordBtn) {
-    console.log("LONG VIDEO MIC: BUTTON MISSING");
-    return;
-  }
-
-  let mediaRecorder = null;
-  let recordedChunks = [];
-  let micStream = null;
-
-  micRecordBtn.addEventListener(
-    "click",
-    async function () {
-
-      try {
-
-        // ------------------------------------------------------
-        // STOP CURRENT RECORDING
-        // ------------------------------------------------------
-
-        if (
-          mediaRecorder &&
-          mediaRecorder.state === "recording"
-        ) {
-
-          mediaRecorder.stop();
-
-          micRecordBtn.textContent =
-            "🎙️ Mic से Record";
-
-          if (micStatus) {
-            micStatus.textContent =
-              "⏳ Recording तैयार हो रही है...";
-          }
-
-          return;
-        }
-
-
-        // ------------------------------------------------------
-        // MICROPHONE SUPPORT CHECK
-        // ------------------------------------------------------
-
-        if (
-          !navigator.mediaDevices ||
-          !navigator.mediaDevices.getUserMedia
-        ) {
-
-          throw new Error(
-            "इस device/browser में Microphone उपलब्ध नहीं है।"
-          );
-
-        }
-
-
-        // ------------------------------------------------------
-        // REQUEST MICROPHONE
-        // ------------------------------------------------------
-
-        micStream =
-          await navigator.mediaDevices.getUserMedia({
-            audio: true
-          });
-
-
-        recordedChunks = [];
-
-
-        // ------------------------------------------------------
-        // SELECT RECORDING FORMAT
-        // ------------------------------------------------------
-
-        let mimeType =
-          "audio/webm";
-
-        if (
-          typeof MediaRecorder !==
-          "undefined"
-        ) {
-
-          if (
-            MediaRecorder.isTypeSupported(
-              "audio/webm;codecs=opus"
-            )
-          ) {
-
-            mimeType =
-              "audio/webm;codecs=opus";
-
-          } else if (
-            MediaRecorder.isTypeSupported(
-              "audio/webm"
-            )
-          ) {
-
-            mimeType =
-              "audio/webm";
-
-          }
-
-        }
-
-
-        // ------------------------------------------------------
-        // CREATE RECORDER
-        // ------------------------------------------------------
-
-        mediaRecorder =
-          new MediaRecorder(
-            micStream,
-            {
-              mimeType: mimeType
-            }
-          );
-
-
-        mediaRecorder.ondataavailable =
-          function (event) {
-
-            if (
-              event.data &&
-              event.data.size > 0
-            ) {
-
-              recordedChunks.push(
-                event.data
-              );
-
-            }
-
-          };
-
-
-        // ------------------------------------------------------
-        // RECORDING STOP
-        // ------------------------------------------------------
-
-        mediaRecorder.onstop =
-          async function () {
-
-            try {
-
-              if (micStream) {
-
-                micStream
-                  .getTracks()
-                  .forEach(
-                    function (track) {
-                      track.stop();
-                    }
-                  );
-
-                micStream = null;
-              }
-
-
-              const blob =
-                new Blob(
-                  recordedChunks,
-                  {
-                    type: mimeType
-                  }
-                );
-
-
-              if (!blob.size) {
-
-                throw new Error(
-                  "Recording खाली है।"
-                );
-
-              }
-
-
-              if (micStatus) {
-                micStatus.textContent =
-                  "⏳ Mic Recording upload हो रही है...";
-              }
-
-
-              const file =
-                new File(
-                  [blob],
-                  "VideoApna-Mic-" +
-                  Date.now() +
-                  ".webm",
-                  {
-                    type: mimeType
-                  }
-                );
-
-
-              // ------------------------------------------------
-              // UPLOAD TO PRIVATE SOUND
-              // ------------------------------------------------
-
-              const formData =
-                new FormData();
-
-              formData.append(
-                "audio",
-                file
-              );
-
-              formData.append(
-                "title",
-                "Mic Recording"
-              );
-
-
-              const response =
-                await fetch(
-                  "/api/private-sound",
-                  {
-                    method: "POST",
-                    body: formData
-                  }
-                );
-
-
-              const result =
-                await response.json();
-
-
-              if (
-                !response.ok ||
-                !result.success
-              ) {
-
-                throw new Error(
-                  result.message ||
-                  "Mic Recording upload नहीं हुई।"
-                );
-
-              }
-
-
-              // ------------------------------------------------
-              // SELECT SOUND FOR LONG VIDEO
-              // ------------------------------------------------
-
-              window.videoApnaSelectedSound =
-                result.sound;
-
-
-              window.videoApnaPhoneSound =
-                null;
-
-
-              const selectedBox =
-                document.getElementById(
-                  "selectedSound"
-                );
-
-              const selectedTitle =
-                document.getElementById(
-                  "selectedSoundTitle"
-                );
-
-
-              if (selectedBox) {
-                selectedBox.classList.remove(
-                  "hidden"
-                );
-              }
-
-
-              if (selectedTitle) {
-                selectedTitle.textContent =
-                  "🎙️ " +
-                  (
-                    result.sound.title ||
-                    "Mic Recording"
-                  );
-              }
-
-
-              if (micStatus) {
-                micStatus.textContent =
-                  "✅ Mic Recording तैयार है।";
-              }
-
-
-              console.log(
-                "LONG VIDEO MIC SOUND SELECTED:",
-                result.sound
-              );
-
-            } catch (error) {
-
-              console.error(
-                "LONG VIDEO MIC ERROR:",
-                error
-              );
-
-              window.videoApnaSelectedSound =
-                null;
-
-              if (micStatus) {
-                micStatus.textContent =
-                  "❌ " +
-                  error.message;
-              }
-
-            }
-
-          };
-
-
-        // ------------------------------------------------------
-        // START RECORDING
-        // ------------------------------------------------------
-
-        mediaRecorder.start();
-
-
-        micRecordBtn.textContent =
-          "⏹️ Recording रोकें";
-
-
-        if (micStatus) {
-          micStatus.textContent =
-            "🔴 Recording चल रही है... फिर बटन दबाकर रोकें।";
-        }
-
-
-        console.log(
-          "LONG VIDEO MIC RECORDING STARTED"
-        );
-
-
-      } catch (error) {
-
-        console.error(
-          "LONG VIDEO MIC START ERROR:",
-          error
-        );
-
-
-        if (micStream) {
-
-          micStream
-            .getTracks()
-            .forEach(
-              function (track) {
-                track.stop();
-              }
-            );
-
-          micStream = null;
-        }
-
-
-        if (micStatus) {
-          micStatus.textContent =
-            "❌ " +
-            error.message;
-        }
-
-
-        micRecordBtn.textContent =
-          "🎙️ Mic से Record";
-
-      }
-
-    }
-  );
-
-})();
-
-
 
 
 /* =========================================================
@@ -6634,1296 +6146,173 @@ window.videoApnaSelectedSound = null;
 ========================================================= */
 (function () {
 
-  const input =
-    document.getElementById("photoVideoInput");
-
-  const countText =
-    document.getElementById("photoCountText");
-
-  const previewGrid =
-    document.getElementById("photoPreviewGrid");
-
-  const titleInput =
-    document.getElementById("photoVideoTitle");
-
-  const descriptionInput =
-    document.getElementById(
-      "photoVideoDescription"
-    );
-
-  const durationSelect =
-    document.getElementById(
-      "photoVideoDuration"
-    );
-
-  const generateBtn =
-    document.getElementById(
-      "generatePhotoVideoBtn"
-    );
-
-  const message =
-    document.getElementById(
-      "photoVideoMessage"
-    );
-
-  const resultBox =
-    document.getElementById(
-      "photoVideoResult"
-    );
-
-  const resultPlayer =
-    document.getElementById(
-      "photoVideoResultPlayer"
-    );
-
-  const chooseSoundBtn =
-    document.getElementById(
-      "photoChooseSoundBtn"
-    );
-
-  const soundPanel =
-    document.getElementById(
-      "photoSoundPanel"
-    );
-
-  const closeSoundBtn =
-    document.getElementById(
-      "photoCloseSoundBtn"
-    );
-
-  const soundList =
-    document.getElementById(
-      "photoSoundList"
-    );
-
-  const selectedSoundBox =
-    document.getElementById(
-      "photoSelectedSound"
-    );
-
-  const selectedSoundTitle =
-    document.getElementById(
-      "photoSelectedSoundTitle"
-    );
-
-  const removeSoundBtn =
-    document.getElementById(
-      "photoRemoveSoundBtn"
-    );
-
-  const phoneSoundInput =
-    document.getElementById(
-      "photoPhoneSoundInput"
-    );
-
-  const micRecordBtn =
-    document.getElementById(
-      "photoMicRecordBtn"
-    );
-
-  const micStatus =
-    document.getElementById(
-      "photoMicStatus"
-    );
-
-  const templateInput =
-    document.getElementById(
-      "photoSelectedTemplate"
-    );
-
-  const templateButtons =
-    document.querySelectorAll(
-      ".photo-template-item"
-    );
+  const input = document.getElementById("photoVideoInput");
+  const countText = document.getElementById("photoCountText");
+  const previewGrid = document.getElementById("photoPreviewGrid");
+  const durationSelect = document.getElementById("photoVideoDuration");
+  const generateBtn = document.getElementById("generatePhotoVideoBtn");
+  const message = document.getElementById("photoVideoMessage");
+  const resultBox = document.getElementById("photoVideoResult");
+  const resultPlayer = document.getElementById("photoVideoResultPlayer");
 
   if (!input || !generateBtn) {
-
-    console.log(
-      "PHOTO VIDEO: ELEMENT MISSING"
-    );
-
+    console.log("PHOTO VIDEO: ELEMENT MISSING");
     return;
   }
 
+  console.log("VIDEOAPNA PHOTO VIDEO READY");
 
-  // ==========================================================
-  // PHOTO TEMPLATE
-  // ==========================================================
+  input.addEventListener("change", function () {
 
-  window.videoApnaPhotoTemplate =
-    "normal";
+    const files = Array.from(input.files || []);
 
-  templateButtons.forEach(
-    function (button) {
+    previewGrid.innerHTML = "";
 
-      button.addEventListener(
-        "click",
-        function (event) {
-
-          event.preventDefault();
-
-          templateButtons.forEach(
-            function (item) {
-              item.classList.remove(
-                "active"
-              );
-            }
-          );
-
-          button.classList.add(
-            "active"
-          );
-
-          const template =
-            button.getAttribute(
-              "data-photo-template"
-            ) || "normal";
-
-          window.videoApnaPhotoTemplate =
-            template;
-
-          if (templateInput) {
-            templateInput.value =
-              template;
-          }
-
-          console.log(
-            "PHOTO TEMPLATE:",
-            template
-          );
-        }
-      );
-
+    if (!files.length) {
+      countText.textContent = "कोई फोटो नहीं चुनी गई";
+      return;
     }
-  );
 
-
-  // ==========================================================
-  // PHOTO PREVIEW
-  // ==========================================================
-
-  input.addEventListener(
-    "change",
-    function () {
-
-      const files =
-        Array.from(
-          input.files || []
-        );
-
-      if (previewGrid) {
-        previewGrid.innerHTML = "";
-      }
-
-      if (!files.length) {
-
-        if (countText) {
-          countText.textContent =
-            "कोई फोटो नहीं चुनी गई";
-        }
-
-        return;
-      }
-
-      if (files.length > 5) {
-
-        if (countText) {
-          countText.textContent =
-            "⚠️ अधिकतम 5 फोटो चुन सकते हैं।";
-        }
-
-        input.value = "";
-
-        return;
-      }
-
-      if (countText) {
-
-        countText.textContent =
-          "📷 " +
-          files.length +
-          " फोटो चुनी गई";
-      }
-
-      files.forEach(
-        function (file) {
-
-          const url =
-            URL.createObjectURL(file);
-
-          const img =
-            document.createElement("img");
-
-          img.src = url;
-
-          img.alt =
-            file.name;
-
-          img.onload =
-            function () {
-              URL.revokeObjectURL(url);
-            };
-
-          if (previewGrid) {
-            previewGrid.appendChild(img);
-          }
-
-        }
-      );
-
+    if (files.length > 5) {
+      countText.textContent = "⚠️ अधिकतम 5 फोटो चुन सकते हैं।";
+      input.value = "";
+      return;
     }
-  );
+
+    countText.textContent =
+      "📷 " + files.length + " फोटो चुनी गई";
+
+    files.forEach(function (file) {
+
+      const url = URL.createObjectURL(file);
+
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = file.name;
+
+      previewGrid.appendChild(img);
+
+    });
+
+  });
 
 
-  // ==========================================================
-  // PUBLIC MUSIC
-  // ==========================================================
+  generateBtn.addEventListener("click", async function () {
 
-  async function loadPhotoPublicMusic() {
+    const files = Array.from(input.files || []);
 
-    if (!soundList) return;
+    if (!files.length) {
+      message.textContent = "⚠️ पहले 1 से 5 फोटो चुनें।";
+      return;
+    }
 
-    soundList.innerHTML =
-      "<p>🎵 Music load हो रहा है...</p>";
+    if (files.length > 5) {
+      message.textContent = "⚠️ अधिकतम 5 फोटो चुन सकते हैं।";
+      return;
+    }
+
+    const duration =
+      Number(durationSelect.value || 10);
+
+    const template =
+      window.videoApnaSelectedTemplate || "normal";
+
+    generateBtn.disabled = true;
+
+    message.textContent =
+      "⏳ फोटो से वीडियो बनाया जा रहा है...";
+
+    resultBox.classList.add("hidden");
 
     try {
 
-      const response =
-        await fetch(
-          "/api/sounds"
-        );
+      const formData = new FormData();
 
-      if (!response.ok) {
-        throw new Error(
-          "Sounds API failed"
-        );
-      }
+      files.forEach(function (file) {
+        formData.append("photos", file);
+      });
 
-      const sounds =
-        await response.json();
+      formData.append(
+        "duration",
+        String(duration)
+      );
 
-      if (
-        !Array.isArray(sounds) ||
-        sounds.length === 0
-      ) {
+      formData.append(
+        "template",
+        template
+      );
 
-        soundList.innerHTML =
-          "<p>अभी Public Music उपलब्ध नहीं है।</p>";
+      console.log("PHOTO VIDEO REQUEST:", {
+        photos: files.length,
+        duration: duration,
+        template: template
+      });
 
-        return;
-      }
-
-      soundList.innerHTML = "";
-
-      sounds.forEach(
-        function (sound) {
-
-          const item =
-            document.createElement(
-              "div"
-            );
-
-          item.className =
-            "sound-item";
-
-          const info =
-            document.createElement(
-              "div"
-            );
-
-          info.className =
-            "sound-item-info";
-
-          const strong =
-            document.createElement(
-              "strong"
-            );
-
-          strong.textContent =
-            sound.title ||
-            "Original Sound";
-
-          const small =
-            document.createElement(
-              "small"
-            );
-
-          small.textContent =
-            sound.channel ||
-            "VideoApna";
-
-          info.appendChild(strong);
-          info.appendChild(small);
-
-
-          const actions =
-            document.createElement(
-              "div"
-            );
-
-          actions.className =
-            "sound-item-actions";
-
-
-          const previewBtn =
-            document.createElement(
-              "button"
-            );
-
-          previewBtn.type =
-            "button";
-
-          previewBtn.className =
-            "sound-preview-btn";
-
-          previewBtn.textContent =
-            "▶";
-
-
-          const useBtn =
-            document.createElement(
-              "button"
-            );
-
-          useBtn.type =
-            "button";
-
-          useBtn.className =
-            "use-sound-btn";
-
-          useBtn.textContent =
-            "Use Sound";
-
-
-          actions.appendChild(
-            previewBtn
-          );
-
-          actions.appendChild(
-            useBtn
-          );
-
-
-          item.appendChild(info);
-          item.appendChild(actions);
-
-          soundList.appendChild(item);
-
-
-          let audio = null;
-
-
-          previewBtn.addEventListener(
-            "click",
-            function (event) {
-
-              event.preventDefault();
-              event.stopPropagation();
-
-              if (audio) {
-
-                audio.pause();
-                audio.currentTime = 0;
-                audio = null;
-
-                previewBtn.textContent =
-                  "▶";
-
-                return;
-              }
-
-              audio =
-                new Audio(
-                  sound.url
-                );
-
-              audio.play()
-                .then(
-                  function () {
-                    previewBtn.textContent =
-                      "⏸";
-                  }
-                )
-                .catch(
-                  function (error) {
-                    console.log(
-                      "PHOTO SOUND PREVIEW ERROR:",
-                      error
-                    );
-                  }
-                );
-
-              audio.addEventListener(
-                "ended",
-                function () {
-
-                  previewBtn.textContent =
-                    "▶";
-
-                  audio = null;
-
-                }
-              );
-
-            }
-          );
-
-
-          useBtn.addEventListener(
-            "click",
-            function (event) {
-
-              event.preventDefault();
-              event.stopPropagation();
-
-              window.videoApnaPhotoSound =
-                sound;
-
-              window.videoApnaSelectedSound =
-                sound;
-
-              if (selectedSoundTitle) {
-                selectedSoundTitle.textContent =
-                  "🎵 " +
-                  (
-                    sound.title ||
-                    "Original Sound"
-                  );
-              }
-
-              if (selectedSoundBox) {
-                selectedSoundBox.classList.remove(
-                  "hidden"
-                );
-              }
-
-              if (soundPanel) {
-                soundPanel.classList.add(
-                  "hidden"
-                );
-              }
-
-              console.log(
-                "PHOTO PUBLIC SOUND SELECTED:",
-                sound
-              );
-
-            }
-          );
-
+      const response = await fetch(
+        "/api/photo-to-video",
+        {
+          method: "POST",
+          body: formData
         }
       );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message ||
+          "Photo से Video नहीं बन पाया।"
+        );
+      }
+
+      console.log(
+        "PHOTO VIDEO CREATED:",
+        result.video
+      );
+
+      if (result.video && result.video.url) {
+
+        resultPlayer.src =
+          result.video.url +
+          "?v=" +
+          Date.now();
+
+        resultPlayer.load();
+
+        resultBox.classList.remove("hidden");
+
+        message.textContent =
+          "✅ आपका Video तैयार है!";
+
+      } else {
+
+        throw new Error(
+          "Video तैयार हुआ लेकिन URL नहीं मिला।"
+        );
+
+      }
 
     } catch (error) {
 
       console.error(
-        "PHOTO PUBLIC MUSIC ERROR:",
+        "PHOTO VIDEO ERROR:",
         error
       );
 
-      soundList.innerHTML =
-        "<p>❌ Music load नहीं हुआ।</p>";
-    }
-
-  }
-
-
-  if (chooseSoundBtn) {
-
-    chooseSoundBtn.addEventListener(
-      "click",
-      async function () {
-
-        if (soundPanel) {
-          soundPanel.classList.remove(
-            "hidden"
-          );
-        }
-
-        await loadPhotoPublicMusic();
-
-      }
-    );
-
-  }
-
-
-  if (closeSoundBtn) {
-
-    closeSoundBtn.addEventListener(
-      "click",
-      function () {
-
-        if (soundPanel) {
-          soundPanel.classList.add(
-            "hidden"
-          );
-        }
-
-      }
-    );
-
-  }
-
-
-  // ==========================================================
-  // PHOTO PHONE MUSIC
-  // ==========================================================
-
-  if (phoneSoundInput) {
-
-    phoneSoundInput.addEventListener(
-      "change",
-      async function () {
-
-        const file =
-          phoneSoundInput.files &&
-          phoneSoundInput.files[0];
-
-        if (!file) return;
-
-        if (!file.type.startsWith("audio/")) {
-
-          alert(
-            "कृपया Audio file चुनें।"
-          );
-
-          phoneSoundInput.value = "";
-
-          return;
-        }
-
-        if (selectedSoundTitle) {
-          selectedSoundTitle.textContent =
-            "⏳ Phone Music upload हो रहा है...";
-        }
-
-        if (selectedSoundBox) {
-          selectedSoundBox.classList.remove(
-            "hidden"
-          );
-        }
-
-        try {
-
-          const formData =
-            new FormData();
-
-          formData.append(
-            "audio",
-            file
-          );
-
-          formData.append(
-            "title",
-            file.name
-          );
-
-          const response =
-            await fetch(
-              "/api/private-sound",
-              {
-                method: "POST",
-                body: formData
-              }
-            );
-
-          const result =
-            await response.json();
-
-          if (
-            !response.ok ||
-            !result.success
-          ) {
-
-            throw new Error(
-              result.message ||
-              "Phone Music upload नहीं हुआ।"
-            );
-          }
-
-          window.videoApnaPhotoSound =
-            result.sound;
-
-          window.videoApnaSelectedSound =
-            result.sound;
-
-          if (selectedSoundTitle) {
-            selectedSoundTitle.textContent =
-              "📱 " +
-              (
-                result.sound.title ||
-                file.name
-              );
-          }
-
-          console.log(
-            "PHOTO PHONE SOUND UPLOADED:",
-            result.sound
-          );
-
-        } catch (error) {
-
-          console.error(
-            "PHOTO PHONE SOUND ERROR:",
-            error
-          );
-
-          window.videoApnaPhotoSound =
-            null;
-
-          window.videoApnaSelectedSound =
-            null;
-
-          if (selectedSoundBox) {
-            selectedSoundBox.classList.add(
-              "hidden"
-            );
-          }
-
-          alert(
-            "❌ Phone Music upload नहीं हुआ:\n" +
-            error.message
-          );
-
-          phoneSoundInput.value = "";
-        }
-
-      }
-    );
-
-  }
-
-
-  // ==========================================================
-  // PHOTO MICROPHONE
-  // ==========================================================
-
-  let mediaRecorder = null;
-  let recordedChunks = [];
-  let micStream = null;
-
-  if (micRecordBtn) {
-
-    micRecordBtn.addEventListener(
-      "click",
-      async function () {
-
-        try {
-
-          if (
-            mediaRecorder &&
-            mediaRecorder.state === "recording"
-          ) {
-
-            mediaRecorder.stop();
-
-            micRecordBtn.textContent =
-              "🎙️ Mic से Record";
-
-            if (micStatus) {
-              micStatus.textContent =
-                "⏳ Recording तैयार हो रही है...";
-            }
-
-            return;
-          }
-
-
-          if (
-            !navigator.mediaDevices ||
-            !navigator.mediaDevices.getUserMedia
-          ) {
-
-            throw new Error(
-              "इस device/browser में Microphone उपलब्ध नहीं है।"
-            );
-          }
-
-
-          micStream =
-            await navigator.mediaDevices.getUserMedia(
-              {
-                audio: true
-              }
-            );
-
-
-          recordedChunks = [];
-
-
-          let mimeType =
-            "audio/webm";
-
-          if (
-            typeof MediaRecorder !==
-            "undefined"
-          ) {
-
-            if (
-              MediaRecorder.isTypeSupported(
-                "audio/webm;codecs=opus"
-              )
-            ) {
-
-              mimeType =
-                "audio/webm;codecs=opus";
-
-            } else if (
-              MediaRecorder.isTypeSupported(
-                "audio/webm"
-              )
-            ) {
-
-              mimeType =
-                "audio/webm";
-            }
-
-          }
-
-
-          mediaRecorder =
-            new MediaRecorder(
-              micStream,
-              {
-                mimeType:
-                  mimeType
-              }
-            );
-
-
-          mediaRecorder.ondataavailable =
-            function (event) {
-
-              if (
-                event.data &&
-                event.data.size > 0
-              ) {
-
-                recordedChunks.push(
-                  event.data
-                );
-
-              }
-
-            };
-
-
-          mediaRecorder.onstop =
-            async function () {
-
-              try {
-
-                if (micStream) {
-
-                  micStream
-                    .getTracks()
-                    .forEach(
-                      function (track) {
-                        track.stop();
-                      }
-                    );
-
-                  micStream = null;
-                }
-
-
-                const blob =
-                  new Blob(
-                    recordedChunks,
-                    {
-                      type:
-                        mimeType
-                    }
-                  );
-
-
-                if (!blob.size) {
-
-                  throw new Error(
-                    "Recording खाली है।"
-                  );
-                }
-
-
-                if (micStatus) {
-                  micStatus.textContent =
-                    "⏳ Recording upload हो रही है...";
-                }
-
-
-                if (selectedSoundBox) {
-                  selectedSoundBox.classList.remove(
-                    "hidden"
-                  );
-                }
-
-
-                const formData =
-                  new FormData();
-
-
-                const file =
-                  new File(
-                    [blob],
-                    "VideoApna-Mic-" +
-                    Date.now() +
-                    ".webm",
-                    {
-                      type:
-                        mimeType
-                    }
-                  );
-
-
-                formData.append(
-                  "audio",
-                  file
-                );
-
-                formData.append(
-                  "title",
-                  "Mic Recording"
-                );
-
-
-                const response =
-                  await fetch(
-                    "/api/private-sound",
-                    {
-                      method: "POST",
-                      body: formData
-                    }
-                  );
-
-
-                const result =
-                  await response.json();
-
-
-                if (
-                  !response.ok ||
-                  !result.success
-                ) {
-
-                  throw new Error(
-                    result.message ||
-                    "Mic Recording upload नहीं हुई।"
-                  );
-                }
-
-
-                window.videoApnaPhotoSound =
-                  result.sound;
-
-                window.videoApnaSelectedSound =
-                  result.sound;
-
-
-                if (selectedSoundTitle) {
-
-                  selectedSoundTitle.textContent =
-                    "🎙️ " +
-                    (
-                      result.sound.title ||
-                      "Mic Recording"
-                    );
-
-                }
-
-
-                if (micStatus) {
-
-                  micStatus.textContent =
-                    "✅ Mic Recording तैयार है।";
-
-                }
-
-
-                console.log(
-                  "PHOTO MIC SOUND UPLOADED:",
-                  result.sound
-                );
-
-
-              } catch (error) {
-
-                console.error(
-                  "PHOTO MIC ERROR:",
-                  error
-                );
-
-                window.videoApnaPhotoSound =
-                  null;
-
-                window.videoApnaSelectedSound =
-                  null;
-
-                if (selectedSoundBox) {
-                  selectedSoundBox.classList.add(
-                    "hidden"
-                  );
-                }
-
-                if (micStatus) {
-                  micStatus.textContent =
-                    "❌ " +
-                    error.message;
-                }
-
-              }
-
-            };
-
-
-          mediaRecorder.start();
-
-
-          micRecordBtn.textContent =
-            "⏹️ Recording रोकें";
-
-
-          if (micStatus) {
-            micStatus.textContent =
-              "🔴 Recording चल रही है... फिर बटन दबाकर रोकें।";
-          }
-
-
-        } catch (error) {
-
-          console.error(
-            "MIC START ERROR:",
-            error
-          );
-
-          if (micStream) {
-
-            micStream
-              .getTracks()
-              .forEach(
-                function (track) {
-                  track.stop();
-                }
-              );
-
-            micStream = null;
-          }
-
-          if (micStatus) {
-            micStatus.textContent =
-              "❌ " +
-              error.message;
-          }
-
-        }
-
-      }
-    );
-
-  }
-
-
-  // ==========================================================
-  // REMOVE SELECTED PHOTO MUSIC
-  // ==========================================================
-
-  if (removeSoundBtn) {
-
-    removeSoundBtn.addEventListener(
-      "click",
-      function () {
-
-        window.videoApnaPhotoSound =
-          null;
-
-        window.videoApnaSelectedSound =
-          null;
-
-        if (selectedSoundBox) {
-          selectedSoundBox.classList.add(
-            "hidden"
-          );
-        }
-
-        if (selectedSoundTitle) {
-          selectedSoundTitle.textContent =
-            "कोई Music नहीं चुना";
-        }
-
-        if (phoneSoundInput) {
-          phoneSoundInput.value = "";
-        }
-
-        if (micStatus) {
-          micStatus.textContent = "";
-        }
-
-      }
-    );
-
-  }
-
-
-  // ==========================================================
-  // GENERATE PHOTO SHORT
-  // ==========================================================
-
-  generateBtn.addEventListener(
-    "click",
-    async function (event) {
-
-      event.preventDefault();
-      event.stopPropagation();
-
-
-      const files =
-        Array.from(
-          input.files || []
-        );
-
-
-      if (!files.length) {
-
-        message.textContent =
-          "⚠️ पहले 1 से 5 फोटो चुनें।";
-
-        return;
-      }
-
-
-      if (files.length > 5) {
-
-        message.textContent =
-          "⚠️ अधिकतम 5 फोटो चुन सकते हैं।";
-
-        return;
-      }
-
-
-      const title =
-        titleInput
-          ? titleInput.value.trim()
-          : "";
-
-
-      if (!title) {
-
-        message.textContent =
-          "⚠️ Photo Short का Title लिखें।";
-
-        if (titleInput) {
-          titleInput.focus();
-        }
-
-        return;
-      }
-
-
-      const description =
-        descriptionInput
-          ? descriptionInput.value.trim()
-          : "";
-
-
-      const duration =
-        Number(
-          durationSelect
-            ? durationSelect.value
-            : 10
-        );
-
-
-      const template =
-        window.videoApnaPhotoTemplate ||
-        (
-          templateInput
-            ? templateInput.value
-            : "normal"
-        ) ||
-        "normal";
-
-
-      const selectedSound =
-        window.videoApnaSelectedSound ||
-        window.videoApnaPhotoSound ||
-        null;
-
-
-      generateBtn.disabled = true;
-
-
       message.textContent =
-        "⏳ Photo Short बनाया जा रहा है...";
+        "❌ " +
+        (error.message ||
+          "Photo से Video नहीं बन पाया।");
 
+    } finally {
 
-      if (resultBox) {
-        resultBox.classList.add(
-          "hidden"
-        );
-      }
-
-
-      try {
-
-        const formData =
-          new FormData();
-
-
-        files.forEach(
-          function (file) {
-
-            formData.append(
-              "photos",
-              file
-            );
-
-          }
-        );
-
-
-        formData.append(
-          "title",
-          title
-        );
-
-
-        formData.append(
-          "description",
-          description
-        );
-
-
-        formData.append(
-          "duration",
-          String(duration)
-        );
-
-
-        formData.append(
-          "template",
-          template
-        );
-
-
-        if (selectedSound) {
-
-          formData.append(
-            "soundId",
-            String(
-              selectedSound.id ||
-              ""
-            )
-          );
-
-        }
-
-
-        console.log(
-          "PHOTO VIDEO REQUEST:",
-          {
-            photos:
-              files.length,
-
-            title:
-              title,
-
-            duration:
-              duration,
-
-            template:
-              template,
-
-            soundId:
-              selectedSound
-                ? selectedSound.id
-                : null
-          }
-        );
-
-
-        const response =
-          await fetch(
-            "/api/photo-to-video",
-            {
-              method: "POST",
-              body: formData
-            }
-          );
-
-
-        const result =
-          await response.json();
-
-
-        if (
-          !response.ok ||
-          !result.success
-        ) {
-
-          throw new Error(
-            result.message ||
-            "Photo Short नहीं बना।"
-          );
-
-        }
-
-
-        message.textContent =
-          "✅ Photo से Short Video तैयार है!";
-
-
-        if (
-          result.video &&
-          result.video.url &&
-          resultBox &&
-          resultPlayer
-        ) {
-
-          resultPlayer.src =
-            result.video.url;
-
-          resultBox.classList.remove(
-            "hidden"
-          );
-
-          try {
-            await resultPlayer.play();
-          } catch {}
-
-        }
-
-
-        console.log(
-          "PHOTO VIDEO SUCCESS:",
-          result
-        );
-
-
-      } catch (error) {
-
-        console.error(
-          "PHOTO VIDEO ERROR:",
-          error
-        );
-
-        message.textContent =
-          "❌ Photo Short नहीं बना: " +
-          error.message;
-
-
-      } finally {
-
-        generateBtn.disabled =
-          false;
-
-      }
+      generateBtn.disabled = false;
 
     }
-  );
 
+  });
 
 })();
-
 
 
 
@@ -8683,9 +7072,20 @@ window.videoApnaSelectedSound = null;
 
     document.body.classList.add("shorts-mode");
 
-    setTimeout(function () {
-      playCurrentShort();
-    }, 500);
+    /*
+     * VideoApna के अपने Shorts autoplay नहीं होंगे।
+     * Odysee / PeerTube का पहला Short पहले जैसा autoplay करेगा।
+     */
+    const firstShort = shortsVideos[shortsIndex];
+
+    if (
+      firstShort &&
+      String(firstShort.source || "").toLowerCase() !== "videoapna"
+    ) {
+      setTimeout(function () {
+        playCurrentShort();
+      }, 500);
+    }
 
   }
 
@@ -8740,36 +7140,54 @@ window.videoApnaSelectedSound = null;
       playerBox.style.background = "#000";
 
       item.appendChild(playerBox);
+
       /*
-       * Full-screen video/iframe Android touch को अपने अंदर ले लेता है।
-       * इसलिए transparent layer vertical swipe handle करेगी।
-       * Sound/action buttons इसके ऊपर रहेंगे।
+       * ========================================================
+       * SHORTS SWIPE RAIL
+       *
+       * VCDN/Odysee iframe cross-origin होने के कारण vertical
+       * swipe parent #shortsFeed तक नहीं पहुँच सकता।
+       *
+       * इसलिए केवल LEFT SIDE पर dedicated swipe area है।
+       * Player के center/bottom controls खुले रहेंगे।
+       * ========================================================
        */
-      const swipeLayer = document.createElement("div");
-      swipeLayer.className = "videoapna-short-swipe-layer";
-      swipeLayer.style.position = "absolute";
-      swipeLayer.style.inset = "0";
-      swipeLayer.style.zIndex = "50";
-      swipeLayer.style.background = "transparent";
-      swipeLayer.style.touchAction = "none";
+      const swipeRail = document.createElement("div");
+
+      swipeRail.className = "videoapna-short-swipe-rail";
+
+      swipeRail.style.position = "absolute";
+      swipeRail.style.left = "0";
+      swipeRail.style.top = "0";
+      swipeRail.style.width = "76px";
+      swipeRail.style.height = "100%";
+      swipeRail.style.zIndex = "90";
+      swipeRail.style.background = "transparent";
+      swipeRail.style.touchAction = "pan-y";
 
       let swipeStartY = 0;
       let swipeStartX = 0;
+      let swipeTracking = false;
 
-      swipeLayer.addEventListener(
+      swipeRail.addEventListener(
         "touchstart",
         function (event) {
           if (!event.touches || !event.touches.length) return;
 
           swipeStartY = event.touches[0].clientY;
           swipeStartX = event.touches[0].clientX;
+          swipeTracking = true;
         },
         { passive: true }
       );
 
-      swipeLayer.addEventListener(
+      swipeRail.addEventListener(
         "touchend",
         function (event) {
+          if (!swipeTracking) return;
+
+          swipeTracking = false;
+
           if (!event.changedTouches || !event.changedTouches.length) {
             return;
           }
@@ -8780,47 +7198,98 @@ window.videoApnaSelectedSound = null;
           const deltaY = endY - swipeStartY;
           const deltaX = endX - swipeStartX;
 
+          /*
+           * केवल साफ vertical swipe को Short navigation मानें।
+           */
           if (
-            Math.abs(deltaY) < 50 ||
-            Math.abs(deltaY) < Math.abs(deltaX)
+            Math.abs(deltaY) < 45 ||
+            Math.abs(deltaY) <= Math.abs(deltaX)
           ) {
             return;
           }
 
-          const currentIndex = shortsVideos.indexOf(video);
-
-          if (currentIndex < 0 || !shortsFeed) return;
-
-          let nextIndex = currentIndex;
+          event.preventDefault();
+          event.stopPropagation();
 
           if (deltaY < 0) {
-            nextIndex = Math.min(
-              currentIndex + 1,
-              shortsVideos.length - 1
-            );
+            /*
+             * Swipe UP → अगला Short
+             */
+            if (shortsIndex < shortsVideos.length - 1) {
+              shortsIndex += 1;
+
+              const nextItem =
+                shortsFeed.querySelector(
+                  '.videoapna-short[data-index="' +
+                  shortsIndex +
+                  '"]'
+                );
+
+              if (nextItem) {
+                nextItem.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start"
+                });
+              }
+
+              setTimeout(function () {
+                playCurrentShort();
+              }, 250);
+            } else {
+              /*
+               * आखिरी loaded Short पर पहुँचे तो अगला batch माँगें।
+               */
+              if (
+                !shortsLoading &&
+                !shortsFinished
+              ) {
+                loadShortsFeed(true);
+              }
+            }
+
           } else {
-            nextIndex = Math.max(
-              currentIndex - 1,
-              0
-            );
+            /*
+             * Swipe DOWN → पिछला Short
+             */
+            if (shortsIndex > 0) {
+              shortsIndex -= 1;
+
+              const previousItem =
+                shortsFeed.querySelector(
+                  '.videoapna-short[data-index="' +
+                  shortsIndex +
+                  '"]'
+                );
+
+              if (previousItem) {
+                previousItem.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start"
+                });
+              }
+
+              setTimeout(function () {
+                playCurrentShort();
+              }, 250);
+            }
           }
-
-          if (nextIndex === currentIndex) return;
-
-          const height = shortsFeed.clientHeight;
-          if (!height) return;
-
-          shortsIndex = nextIndex;
-
-          shortsFeed.scrollTo({
-            top: nextIndex * height,
-            behavior: "smooth"
-          });
         },
-        { passive: true }
+        { passive: false }
       );
 
-      item.appendChild(swipeLayer);
+      item.appendChild(swipeRail);
+
+      /*
+       * IMPORTANT:
+       * Full-screen transparent swipe layer हटाई गई है।
+       *
+       * यह layer VCDN/Odysee iframe के ऊपर आकर
+       * Play, Pause और player controls के touch रोक रही थी।
+       *
+       * अब Shorts का native scroll container
+       * vertical swipe संभालेगा और iframe को
+       * अपने controls के लिए पूरा touch मिलेगा।
+       */
 
       const info = document.createElement("div");
 
@@ -8997,9 +7466,6 @@ window.videoApnaSelectedSound = null;
 
             shortsIndex = index;
 
-            /*
-             * Remix की पूरी जानकारी एक ही जगह रखें।
-             */
             window.videoApnaRemixState = {
               mode: "",
               sourceShortId:
@@ -9008,9 +7474,6 @@ window.videoApnaSelectedSound = null;
                 video
             };
 
-            /*
-             * केवल दो विकल्प।
-             */
             const oldMenu =
               document.getElementById(
                 "videoApnaRemixMenu"
@@ -9113,11 +7576,6 @@ window.videoApnaSelectedSound = null;
 
                 closeMenu();
 
-                console.log(
-                  "🎵 Music Remix:",
-                  window.videoApnaRemixState
-                );
-
                 if (
                   typeof window.videoApnaOpenRemixCreator ===
                   "function"
@@ -9128,7 +7586,7 @@ window.videoApnaSelectedSound = null;
                   );
                 } else {
                   alert(
-                    "🎵 Music Remix Creator अगला Step में जोड़ा जाएगा।"
+                    "🎵 Music Remix Creator उपलब्ध नहीं है।"
                   );
                 }
               }
@@ -9146,11 +7604,6 @@ window.videoApnaSelectedSound = null;
 
                 closeMenu();
 
-                console.log(
-                  "🤝 Collab Remix:",
-                  window.videoApnaRemixState
-                );
-
                 if (
                   typeof window.videoApnaOpenRemixCreator ===
                   "function"
@@ -9161,7 +7614,7 @@ window.videoApnaSelectedSound = null;
                   );
                 } else {
                   alert(
-                    "🤝 Collab Creator अगला Step में जोड़ा जाएगा।"
+                    "🤝 Collab Creator उपलब्ध नहीं है।"
                   );
                 }
               }
@@ -9194,7 +7647,6 @@ window.videoApnaSelectedSound = null;
 
         actions.appendChild(remixBtn);
       }
-
 
       item.appendChild(actions);
 
@@ -9280,107 +7732,111 @@ window.videoApnaSelectedSound = null;
     }
 
     /*
-     * VideoApna / VCDN Shorts:
-     * VCDN का पुराना storage master.m3u8 URL सीधे usable नहीं है।
-     * पहले player-config से temporary token वाला playbackUrl लें।
+     * ============================================================
+     * VIDEOAPNA / VCDN SHORTS
+     *
+     * VCDN का HLS master.m3u8 सीधे Android WebView <video>
+     * में reliable नहीं है।
+     *
+     * इसलिए VideoApna Shorts के लिए official VCDN Embed Player
+     * iframe इस्तेमाल करें।
+     * ============================================================
      */
     if (
       String(video.source || "").toLowerCase() === "videoapna" &&
-      video.vcdnVideoId
+      (video.vcdnVideoId || video.vcdnEmbedUrl || video.embedUrl)
     ) {
-      try {
-        const configUrl =
-          "https://embed.vcdn.me/api/bff/player-config/" +
-          encodeURIComponent(String(video.vcdnVideoId));
 
-        const response = await fetch(configUrl, {
-          method: "GET",
-          cache: "no-store"
-        });
+      const embedUrl =
+        video.vcdnEmbedUrl ||
+        video.embedUrl ||
+        (
+          video.vcdnVideoId
+            ? "https://embed.vcdn.me/embed/" +
+              encodeURIComponent(String(video.vcdnVideoId))
+            : ""
+        );
 
-        if (!response.ok) {
-          throw new Error(
-            "VCDN player-config HTTP " + response.status
-          );
-        }
+      if (!embedUrl) {
+        console.error(
+          "❌ VideoApna VCDN embed URL नहीं मिला:",
+          video
+        );
+        return null;
+      }
 
-        const config = await response.json();
+      const iframe =
+        document.createElement("iframe");
 
-        const playbackUrl =
-          config.playbackUrl ||
-          config.streamUrl ||
-          (
-            Array.isArray(config.playbackSources) &&
-            config.playbackSources[0] &&
-            config.playbackSources[0].streamUrl
-          );
+      let src = String(embedUrl);
 
-        if (!playbackUrl) {
-          throw new Error("VCDN playbackUrl नहीं मिला।");
-        }
+      const separator =
+        src.includes("?") ? "&" : "?";
 
-        const player = document.createElement("video");
-
-        player.src = String(playbackUrl);
-        player.autoplay = true;
-        player.loop = false;
-        player.playsInline = true;
-        player.controls = true;
-
-        player.muted = !(
+      /*
+       * VIDEOAPNA VCDN SHORTS
+       * Current Short आते ही player automatic play करेगा।
+       * Sound preference के अनुसार muted रहेगा या नहीं।
+       */
+      src +=
+        separator +
+        "autoplay=1" +
+        "&muted=" +
+        (
           shortsSoundEnabled &&
           shortsSoundUnlocked
-        );
+            ? "0"
+            : "1"
+        ) +
+        "&controls=1";
 
-        player.style.width = "100%";
-        player.style.height = "100%";
-        player.style.objectFit = "contain";
-        player.style.background = "#000";
-        player.style.display = "block";
+      iframe.src = src;
 
-        player.setAttribute("playsinline", "");
-        player.setAttribute("webkit-playsinline", "");
+      iframe.title =
+        video.title || "VideoApna Short";
 
-        player.addEventListener("error", function () {
-          console.error(
-            "❌ VideoApna VCDN playback error:",
-            video.vcdnVideoId,
-            player.error
-          );
-        });
+      iframe.allow =
+        "autoplay; encrypted-media; picture-in-picture; fullscreen";
 
-        console.log(
-          "✅ VideoApna VCDN token playback:",
-          video.title || "",
-          video.vcdnVideoId
-        );
+      iframe.allowFullscreen = true;
 
-        return player;
+      iframe.setAttribute(
+        "playsinline",
+        ""
+      );
 
-      } catch (error) {
-        console.error(
-          "❌ VideoApna VCDN playback config failed:",
-          error
-        );
+      iframe.style.width = "100%";
+      iframe.style.height = "100%";
+      iframe.style.border = "0";
+      iframe.style.display = "block";
+      iframe.style.background = "#000";
 
-        /*
-         * अगर token playback किसी कारण से fail हो,
-         * तो पुराने VCDN embed को fallback रखें।
-         */
-      }
+      console.log(
+        "✅ VideoApna VCDN EMBED:",
+        video.title || "",
+        embedUrl
+      );
+
+      return iframe;
     }
 
     /*
-     * PeerTube direct videoUrl उपलब्ध हो तो HTML5 video इस्तेमाल करें।
+     * ============================================================
+     * PEERTUBE SHORTS
+     * ============================================================
      */
     if (
       String(video.source || "").toLowerCase() === "peertube" &&
       video.videoUrl
     ) {
-      const player = document.createElement("video");
 
-      player.src = String(video.videoUrl);
-      player.autoplay = true;
+      const player =
+        document.createElement("video");
+
+      player.src =
+        String(video.videoUrl);
+
+      player.autoplay = false;
       player.loop = false;
       player.playsInline = true;
       player.controls = true;
@@ -9396,27 +7852,36 @@ window.videoApnaSelectedSound = null;
       player.style.background = "#000";
       player.style.display = "block";
 
-      player.setAttribute("playsinline", "");
-      player.setAttribute("webkit-playsinline", "");
+      player.setAttribute(
+        "playsinline",
+        ""
+      );
+
+      player.setAttribute(
+        "webkit-playsinline",
+        ""
+      );
 
       return player;
     }
 
     /*
-     * VideoApna VCDN token playback fail होने पर,
-     * या Odysee के लिए iframe fallback।
+     * ============================================================
+     * EXTERNAL / ODYSEE SHORTS
+     * ============================================================
      */
     if (!video.embedUrl) {
       return null;
     }
 
-    const iframe = document.createElement("iframe");
+    const iframe =
+      document.createElement("iframe");
 
-    let src = String(video.embedUrl);
+    let src =
+      String(video.embedUrl);
 
-    const separator = src.includes("?")
-      ? "&"
-      : "?";
+    const separator =
+      src.includes("?") ? "&" : "?";
 
     src +=
       separator +
@@ -9437,9 +7902,14 @@ window.videoApnaSelectedSound = null;
       video.title || "Short";
 
     iframe.allow =
-      "autoplay; encrypted-media; picture-in-picture";
+      "autoplay; encrypted-media; picture-in-picture; fullscreen";
 
     iframe.allowFullscreen = true;
+
+    iframe.setAttribute(
+      "playsinline",
+      ""
+    );
 
     iframe.style.width = "100%";
     iframe.style.height = "100%";
@@ -9617,7 +8087,1174 @@ window.videoApnaSelectedSound = null;
   }
 
 
-  
+  window.videoApnaLoadShorts =
+    loadShortsFeed;
+
+  // Shorts अब Home खुलते ही अपने-आप नहीं चलेगा।
+  // इसे सिर्फ Shorts खोलने पर videoApnaLoadShorts() से चलाया जाएगा.
+
+
+  window.videoApnaLoadShorts = loadShortsFeed;
+
+  // Shorts अब Home खुलते ही अपने-आप नहीं चलेगा।
+  // इसे सिर्फ Shorts खोलने पर videoApnaLoadShorts() से चलाया जाएगा।
+
+})();
+
+
+/* =========================================
+   VIDEOAPNA OWNER REPORT PANEL JS
+========================================= */
+
+let ownerReports = [];
+let ownerReportsLoading = false;
+
+
+/* Owner Panel खोलना */
+window.openOwnerPanel = async function () {
+  const section = document.getElementById("ownerPanelSection");
+
+  if (!section) {
+    console.error("Owner Panel section नहीं मिला।");
+    return;
+  }
+
+  section.classList.remove("hidden");
+
+  /* बाकी मुख्य sections छुपाएँ */
+  document.querySelectorAll("main > section").forEach(el => {
+    if (el.id !== "ownerPanelSection") {
+      el.classList.add("hidden");
+    }
+  });
+
+  await checkOwnerSession();
+};
+
+
+/* Owner session check */
+async function checkOwnerSession() {
+  const loginBox =
+    document.getElementById("ownerLoginBox");
+
+  const dashboardBox =
+    document.getElementById("ownerDashboardBox");
+
+  const message =
+    document.getElementById("ownerLoginMessage");
+
+  try {
+    const response =
+      await fetch("/api/owner/me", {
+        credentials: "same-origin"
+      });
+
+    const data = await response.json();
+
+    if (
+      response.ok &&
+      data.success &&
+      data.authenticated
+    ) {
+      loginBox?.classList.add("hidden");
+      dashboardBox?.classList.remove("hidden");
+
+      const email =
+        document.getElementById("ownerLoggedEmail");
+
+      if (email) {
+        email.textContent =
+          data.owner?.email || "";
+      }
+
+      await loadOwnerReports();
+
+    } else {
+      loginBox?.classList.remove("hidden");
+      dashboardBox?.classList.add("hidden");
+
+      if (message) {
+        message.textContent =
+          "Owner Login करें।";
+      }
+    }
+
+  } catch (error) {
+    console.error(
+      "OWNER SESSION CHECK ERROR:",
+      error
+    );
+
+    if (message) {
+      message.textContent =
+        "Owner Session check नहीं हो पाया।";
+    }
+  }
+}
+
+
+/* Owner Login */
+async function ownerLogin() {
+  const emailInput =
+    document.getElementById("ownerEmailInput");
+
+  const passwordInput =
+    document.getElementById("ownerPasswordInput");
+
+  const message =
+    document.getElementById("ownerLoginMessage");
+
+  const email =
+    String(emailInput?.value || "").trim();
+
+  const password =
+    String(passwordInput?.value || "");
+
+  if (!email || !password) {
+    if (message) {
+      message.textContent =
+        "Email और Password दोनों भरें।";
+    }
+    return;
+  }
+
+  const button =
+    document.getElementById("ownerLoginBtn");
+
+  if (button) {
+    button.disabled = true;
+    button.textContent = "⏳ Login हो रहा है...";
+  }
+
+  try {
+    const response =
+      await fetch("/api/owner/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          email,
+          password
+        })
+      });
+
+    const data =
+      await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.message ||
+        "Owner Login failed"
+      );
+    }
+
+    if (message) {
+      message.textContent =
+        "✅ Owner Login सफल है।";
+    }
+
+    if (passwordInput) {
+      passwordInput.value = "";
+    }
+
+    await checkOwnerSession();
+
+  } catch (error) {
+    console.error(
+      "OWNER LOGIN ERROR:",
+      error
+    );
+
+    if (message) {
+      message.textContent =
+        "❌ " + error.message;
+    }
+
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "🔐 Owner Login";
+    }
+  }
+}
+
+
+/* Owner Logout */
+async function ownerLogout() {
+  try {
+    const response =
+      await fetch("/api/owner/logout", {
+        method: "POST",
+        credentials: "same-origin"
+      });
+
+    const data =
+      await response.json();
+
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.message ||
+        "Logout failed"
+      );
+    }
+
+    ownerReports = [];
+
+    const list =
+      document.getElementById("ownerReportsList");
+
+    if (list) {
+      list.innerHTML = "";
+    }
+
+    document
+      .getElementById("ownerDashboardBox")
+      ?.classList.add("hidden");
+
+    document
+      .getElementById("ownerLoginBox")
+      ?.classList.remove("hidden");
+
+    const message =
+      document.getElementById("ownerLoginMessage");
+
+    if (message) {
+      message.textContent =
+        "✅ Owner Logout हो गया।";
+    }
+
+  } catch (error) {
+    console.error(
+      "OWNER LOGOUT ERROR:",
+      error
+    );
+
+    alert(
+      "Logout में समस्या हुई: " +
+      error.message
+    );
+  }
+}
+
+
+/* Reports load */
+async function loadOwnerReports() {
+  if (ownerReportsLoading) return;
+
+  ownerReportsLoading = true;
+
+  const message =
+    document.getElementById("ownerReportsMessage");
+
+  if (message) {
+    message.textContent =
+      "⏳ Reports लोड हो रही हैं...";
+  }
+
+  try {
+    const response =
+      await fetch("/api/owner/reports", {
+        credentials: "same-origin"
+      });
+
+    const data =
+      await response.json();
+
+    if (response.status === 401) {
+      await checkOwnerSession();
+      return;
+    }
+
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.message ||
+        "Reports load failed"
+      );
+    }
+
+    ownerReports =
+      Array.isArray(data.reports)
+        ? data.reports
+        : [];
+
+    updateOwnerReportSummary();
+    renderOwnerReports();
+
+  } catch (error) {
+    console.error(
+      "OWNER REPORT LOAD ERROR:",
+      error
+    );
+
+    if (message) {
+      message.textContent =
+        "❌ Reports load नहीं हो पाईं: " +
+        error.message;
+    }
+
+  } finally {
+    ownerReportsLoading = false;
+  }
+}
+
+
+/* Summary */
+function updateOwnerReportSummary() {
+  const total =
+    ownerReports.length;
+
+  const pending =
+    ownerReports.filter(
+      r => String(r.status || "pending") === "pending"
+    ).length;
+
+  const resolved =
+    ownerReports.filter(
+      r => String(r.status || "") === "resolved"
+    ).length;
+
+  const rejected =
+    ownerReports.filter(
+      r => String(r.status || "") === "rejected"
+    ).length;
+
+  const totalEl =
+    document.getElementById("ownerTotalReports");
+
+  const pendingEl =
+    document.getElementById("ownerPendingReports");
+
+  const resolvedEl =
+    document.getElementById("ownerResolvedReports");
+
+  const rejectedEl =
+    document.getElementById("ownerRejectedReports");
+
+  if (totalEl) totalEl.textContent = total;
+  if (pendingEl) pendingEl.textContent = pending;
+  if (resolvedEl) resolvedEl.textContent = resolved;
+  if (rejectedEl) rejectedEl.textContent = rejected;
+}
+
+
+/* HTML safe text */
+function ownerEscapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+
+/* Reports render */
+function renderOwnerReports() {
+  const list =
+    document.getElementById("ownerReportsList");
+
+  const filter =
+    document.getElementById("ownerReportFilter")
+      ?.value || "all";
+
+  const message =
+    document.getElementById("ownerReportsMessage");
+
+  if (!list) return;
+
+  let reports =
+    ownerReports.slice();
+
+  if (filter !== "all") {
+    reports =
+      reports.filter(
+        r =>
+          String(r.status || "pending") === filter
+      );
+  }
+
+  if (!reports.length) {
+    list.innerHTML =
+      '<div class="owner-no-reports">📭 इस filter में कोई Report नहीं है।</div>';
+
+    if (message) {
+      message.textContent =
+        "Reports: 0";
+    }
+
+    return;
+  }
+
+  if (message) {
+    message.textContent =
+      "Reports: " + reports.length;
+  }
+
+  list.innerHTML =
+    reports.map(report => {
+
+      const status =
+        String(report.status || "pending");
+
+      const source =
+        String(report.source || "videoapna");
+
+      const created =
+        report.createdAt
+          ? new Date(report.createdAt)
+              .toLocaleString("hi-IN")
+          : "समय उपलब्ध नहीं";
+
+      const reviewed =
+        report.reviewedAt
+          ? new Date(report.reviewedAt)
+              .toLocaleString("hi-IN")
+          : "";
+
+      const statusLabel =
+        status === "pending"
+          ? "🟡 Pending"
+          : status === "resolved"
+          ? "🟢 Resolved"
+          : status === "rejected"
+          ? "🔴 Rejected"
+          : status;
+
+      const isPending =
+        status === "pending";
+
+      const actionButtons =
+        isPending
+          ? `
+            <div class="owner-report-actions">
+
+              <button
+                type="button"
+                class="owner-action-private"
+                data-report-id="${ownerEscapeHtml(report.id)}"
+              >
+                🔒 Private
+              </button>
+
+              <button
+                type="button"
+                class="owner-action-delete"
+                data-report-id="${ownerEscapeHtml(report.id)}"
+              >
+                🗑️ Delete
+              </button>
+
+              <button
+                type="button"
+                class="owner-action-resolve"
+                data-report-id="${ownerEscapeHtml(report.id)}"
+              >
+                ✅ Resolve
+              </button>
+
+              <button
+                type="button"
+                class="owner-action-reject"
+                data-report-id="${ownerEscapeHtml(report.id)}"
+              >
+                ❌ Reject
+              </button>
+
+            </div>
+          `
+          : `
+            <div class="owner-report-actions">
+
+              ${
+                status === "resolved"
+                  ? `
+                    <button
+                      type="button"
+                      class="owner-action-restore"
+                      data-report-id="${ownerEscapeHtml(report.id)}"
+                    >
+                      ♻️ Restore
+                    </button>
+                  `
+                  : ""
+              }
+
+            </div>
+          `;
+
+      return `
+        <article class="owner-report-card">
+
+          <div class="owner-report-card-top">
+
+            <strong>
+              🚩 ${ownerEscapeHtml(
+                report.videoTitle || "Unknown Video"
+              )}
+            </strong>
+
+            <span class="owner-report-status">
+              ${ownerEscapeHtml(statusLabel)}
+            </span>
+
+          </div>
+
+          <div class="owner-report-info">
+
+            <p>
+              <strong>Video ID:</strong>
+              ${ownerEscapeHtml(report.videoId)}
+            </p>
+
+            <p>
+              <strong>Source:</strong>
+              ${ownerEscapeHtml(source)}
+            </p>
+
+            <p>
+              <strong>Reporter:</strong>
+              ${ownerEscapeHtml(report.reporterUserId)}
+            </p>
+
+            <p>
+              <strong>Reason:</strong>
+              ${ownerEscapeHtml(report.reason)}
+            </p>
+
+            ${
+              report.details
+                ? `
+                  <p>
+                    <strong>Details:</strong>
+                    ${ownerEscapeHtml(report.details)}
+                  </p>
+                `
+                : ""
+            }
+
+            <p>
+              <strong>Report Time:</strong>
+              ${ownerEscapeHtml(created)}
+            </p>
+
+            ${
+              report.action
+                ? `
+                  <p>
+                    <strong>Action:</strong>
+                    ${ownerEscapeHtml(report.action)}
+                  </p>
+                `
+                : ""
+            }
+
+            ${
+              report.moderatorNote
+                ? `
+                  <p>
+                    <strong>Owner Note:</strong>
+                    ${ownerEscapeHtml(report.moderatorNote)}
+                  </p>
+                `
+                : ""
+            }
+
+            ${
+              reviewed
+                ? `
+                  <p>
+                    <strong>Reviewed:</strong>
+                    ${ownerEscapeHtml(reviewed)}
+                  </p>
+                `
+                : ""
+            }
+
+          </div>
+
+          ${actionButtons}
+
+        </article>
+      `;
+    }).join("");
+}
+
+
+/* Moderation action */
+async function ownerReportAction(
+  reportId,
+  action
+) {
+  const report =
+    ownerReports.find(
+      r => String(r.id) === String(reportId)
+    );
+
+  if (!report) {
+    alert("Report नहीं मिली।");
+    return;
+  }
+
+  let note = "";
+
+  if (
+    action === "private" ||
+    action === "delete" ||
+    action === "reject"
+  ) {
+    note =
+      window.prompt(
+        "Owner Note लिखें:",
+        ""
+      );
+
+    if (note === null) {
+      return;
+    }
+  }
+
+  if (action === "delete") {
+    const ok =
+      window.confirm(
+        "क्या आप इस Video को सच में Delete करना चाहते हैं?"
+      );
+
+    if (!ok) return;
+  }
+
+  try {
+    const response =
+      await fetch(
+        "/api/owner/reports/" +
+        encodeURIComponent(reportId) +
+        "/action",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            action,
+            moderatorNote: note
+          })
+        }
+      );
+
+    const data =
+      await response.json();
+
+    if (response.status === 401) {
+      alert("Owner Login जरूरी है।");
+      await checkOwnerSession();
+      return;
+    }
+
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.message ||
+        "Moderation action failed"
+      );
+    }
+
+    alert(
+      "✅ " +
+      (data.message || "Action सफल है।")
+    );
+
+    await loadOwnerReports();
+
+  } catch (error) {
+    console.error(
+      "OWNER REPORT ACTION ERROR:",
+      error
+    );
+
+    alert(
+      "❌ Action नहीं हो पाया: " +
+      error.message
+    );
+  }
+}
+
+
+/* Buttons */
+document.addEventListener(
+  "click",
+  event => {
+
+    const loginBtn =
+      event.target.closest(
+        "#ownerLoginBtn"
+      );
+
+    if (loginBtn) {
+      ownerLogin();
+      return;
+    }
+
+    const logoutBtn =
+      event.target.closest(
+        "#ownerLogoutBtn"
+      );
+
+    if (logoutBtn) {
+      ownerLogout();
+      return;
+    }
+
+    const refreshBtn =
+      event.target.closest(
+        "#ownerRefreshReportsBtn"
+      );
+
+    if (refreshBtn) {
+      loadOwnerReports();
+      return;
+    }
+
+    const privateBtn =
+      event.target.closest(
+        ".owner-action-private"
+      );
+
+    if (privateBtn) {
+      ownerReportAction(
+        privateBtn.dataset.reportId,
+        "private"
+      );
+      return;
+    }
+
+    const deleteBtn =
+      event.target.closest(
+        ".owner-action-delete"
+      );
+
+    if (deleteBtn) {
+      ownerReportAction(
+        deleteBtn.dataset.reportId,
+        "delete"
+      );
+      return;
+    }
+
+    const resolveBtn =
+      event.target.closest(
+        ".owner-action-resolve"
+      );
+
+    if (resolveBtn) {
+      ownerReportAction(
+        resolveBtn.dataset.reportId,
+        "resolve"
+      );
+      return;
+    }
+
+    const rejectBtn =
+      event.target.closest(
+        ".owner-action-reject"
+      );
+
+    if (rejectBtn) {
+      ownerReportAction(
+        rejectBtn.dataset.reportId,
+        "reject"
+      );
+      return;
+    }
+
+    const restoreBtn =
+      event.target.closest(
+        ".owner-action-restore"
+      );
+
+    if (restoreBtn) {
+      ownerReportAction(
+        restoreBtn.dataset.reportId,
+        "restore"
+      );
+      return;
+    }
+
+  },
+  true
+);
+
+
+/* Filter */
+document.addEventListener(
+  "change",
+  event => {
+
+    if (
+      event.target &&
+      event.target.id === "ownerReportFilter"
+    ) {
+      renderOwnerReports();
+    }
+
+  },
+  true
+);
+
+
+/* Back button */
+document.addEventListener(
+  "click",
+  event => {
+
+    const backBtn =
+      event.target.closest(
+        "#ownerPanelBack"
+      );
+
+    if (!backBtn) return;
+
+    document
+      .getElementById("ownerPanelSection")
+      ?.classList.add("hidden");
+
+    /* Home वापस */
+    if (typeof window.showHome === "function") {
+      window.showHome();
+    } else {
+      document
+        .querySelector("main > section")
+        ?.classList.remove("hidden");
+    }
+
+  },
+  true
+);
+
+
+
+
+  const openOwnerPanelBtn =
+    document.getElementById("openOwnerPanelBtn");
+
+  if (openOwnerPanelBtn) {
+    openOwnerPanelBtn.addEventListener("click", () => {
+      if (typeof window.openOwnerPanel === "function") {
+        window.openOwnerPanel();
+      } else {
+        console.error("openOwnerPanel function नहीं मिला।");
+      }
+    });
+  }
+
+
+
+/* =========================================
+   VIDEOAPNA PUBLIC ACCOUNT UI
+========================================= */
+(function initVideoApnaPublicAccount() {
+
+  function showAccountMessage(message, success = false) {
+    const el = document.getElementById("publicAccountMessage");
+    if (!el) return;
+
+    el.textContent = message;
+    el.style.display = "block";
+    el.style.color = success ? "#15803d" : "#b91c1c";
+  }
+
+  function setAccountUI(authenticated, user) {
+    const loggedOut =
+      document.getElementById("publicAccountLoggedOut");
+
+    const loggedIn =
+      document.getElementById("publicAccountLoggedIn");
+
+    const status =
+      document.getElementById("publicAccountStatus");
+
+    const emailText =
+      document.getElementById("publicAccountEmailText");
+
+    if (!loggedOut || !loggedIn) return;
+
+    if (authenticated && user) {
+      loggedOut.classList.add("hidden");
+      loggedIn.classList.remove("hidden");
+
+      if (emailText) {
+        emailText.textContent = user.email || "";
+      }
+
+      if (status) {
+        status.textContent =
+          "✅ आपका VideoApna Account Login है। अब आप अपना वीडियो Upload कर सकते हैं।";
+      }
+    } else {
+      loggedOut.classList.remove("hidden");
+      loggedIn.classList.add("hidden");
+
+      if (status) {
+        status.textContent =
+          "वीडियो देखने के लिए Login जरूरी नहीं है। अपना वीडियो Upload करने के लिए Account बनाइए।";
+      }
+    }
+  }
+
+  async function checkPublicAccount() {
+    try {
+      const response = await fetch("/api/auth/me", {
+        credentials: "include"
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success && data.authenticated) {
+        setAccountUI(true, data.user);
+      } else {
+        setAccountUI(false, null);
+      }
+
+    } catch (error) {
+      console.error("PUBLIC ACCOUNT ME ERROR:", error);
+      setAccountUI(false, null);
+    }
+  }
+
+  async function registerPublicAccount() {
+
+    const name =
+      (document.getElementById("publicAccountName")?.value || "").trim();
+
+    const email =
+      (document.getElementById("publicAccountEmail")?.value || "").trim();
+
+    const password =
+      document.getElementById("publicAccountPassword")?.value || "";
+
+    if (!email) {
+      showAccountMessage("❌ Email डालिए।");
+      return;
+    }
+
+    if (password.length < 8) {
+      showAccountMessage("❌ Password कम से कम 8 अक्षर का होना चाहिए।");
+      return;
+    }
+
+    showAccountMessage("⏳ Account बनाया जा रहा है...", true);
+
+    try {
+
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          displayName: name || "VideoApna User"
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        showAccountMessage(
+          "❌ " + (data.message || "Account नहीं बन पाया।")
+        );
+        return;
+      }
+
+      showAccountMessage(
+        "✅ Account सफलतापूर्वक बन गया।",
+        true
+      );
+
+      setAccountUI(true, data.user);
+
+      const passwordInput =
+        document.getElementById("publicAccountPassword");
+
+      if (passwordInput) {
+        passwordInput.value = "";
+      }
+
+    } catch (error) {
+
+      console.error("PUBLIC REGISTER ERROR:", error);
+
+      showAccountMessage(
+        "❌ Server से connection नहीं हो पाया।"
+      );
+    }
+  }
+
+  async function loginPublicAccount() {
+
+    const email =
+      (document.getElementById("publicAccountEmail")?.value || "").trim();
+
+    const password =
+      document.getElementById("publicAccountPassword")?.value || "";
+
+    if (!email || !password) {
+      showAccountMessage("❌ Email और Password दोनों डालिए।");
+      return;
+    }
+
+    showAccountMessage("⏳ Login हो रहा है...", true);
+
+    try {
+
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email,
+          password
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        showAccountMessage(
+          "❌ " + (data.message || "Login नहीं हुआ।")
+        );
+        return;
+      }
+
+      showAccountMessage(
+        "✅ Login सफल है।",
+        true
+      );
+
+      setAccountUI(true, data.user);
+
+      const passwordInput =
+        document.getElementById("publicAccountPassword");
+
+      if (passwordInput) {
+        passwordInput.value = "";
+      }
+
+    } catch (error) {
+
+      console.error("PUBLIC LOGIN ERROR:", error);
+
+      showAccountMessage(
+        "❌ Server से connection नहीं हो पाया।"
+      );
+    }
+  }
+
+  async function logoutPublicAccount() {
+
+    try {
+
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include"
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        showAccountMessage(
+          "❌ Logout नहीं हो पाया।"
+        );
+        return;
+      }
+
+      setAccountUI(false, null);
+
+      showAccountMessage(
+        "✅ Logout सफल है।",
+        true
+      );
+
+    } catch (error) {
+
+      console.error("PUBLIC LOGOUT ERROR:", error);
+
+      showAccountMessage(
+        "❌ Server से connection नहीं हो पाया।"
+      );
+    }
+  }
+
+  function bindPublicAccountButtons() {
+
+    const registerBtn =
+      document.getElementById("publicAccountRegisterBtn");
+
+    const loginBtn =
+      document.getElementById("publicAccountLoginBtn");
+
+    const logoutBtn =
+      document.getElementById("publicAccountLogoutBtn");
+
+    const forgotBtn =
+      document.getElementById("publicAccountForgotBtn");
+
+    if (registerBtn && !registerBtn.dataset.accountBound) {
+      registerBtn.dataset.accountBound = "1";
+      registerBtn.addEventListener(
+        "click",
+        registerPublicAccount
+      );
+    }
+
+    if (loginBtn && !loginBtn.dataset.accountBound) {
+      loginBtn.dataset.accountBound = "1";
+      loginBtn.addEventListener(
+        "click",
+        loginPublicAccount
+      );
+    }
+
+    if (logoutBtn && !logoutBtn.dataset.accountBound) {
+      logoutBtn.dataset.accountBound = "1";
+      logoutBtn.addEventListener(
+        "click",
+        logoutPublicAccount
+      );
+    }
+
+    if (forgotBtn && !forgotBtn.dataset.accountBound) {
+      forgotBtn.dataset.accountBound = "1";
+      forgotBtn.addEventListener("click", function () {
+        showAccountMessage(
+          "ℹ️ Password Recovery जल्द जोड़ा जाएगा।"
+        );
+      });
+    }
+  }
+
+  function initPublicAccount() {
+    bindPublicAccountButtons();
+    checkPublicAccount();
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener(
+      "DOMContentLoaded",
+      initPublicAccount
+    );
+  } else {
+    initPublicAccount();
+  }
+
+  window.initVideoApnaPublicAccount =
+    initPublicAccount;
+
+
   /*
    * ============================================================
    * VIDEOAPNA REMIX CREATOR OPENER
@@ -9721,17 +9358,71 @@ window.videoApnaSelectedSound = null;
       if (collabSource) {
         collabSource.innerHTML = "";
 
-        const sourceText =
-          document.createElement("div");
+        const sourceUrl =
+          sourceVideo?.vcdnEmbedUrl ||
+          sourceVideo?.vcdnPlaybackUrl ||
+          sourceVideo?.videoUrl ||
+          sourceVideo?.url ||
+          sourceVideo?.src ||
+          "";
 
-        sourceText.textContent =
-          sourceVideo?.title ||
-          "Original Short";
+        if (sourceUrl) {
+          const isEmbed =
+            String(sourceUrl).includes("/embed/");
 
-        sourceText.style.cssText =
-          "padding:20px;color:#fff;text-align:center;";
+          if (isEmbed) {
+            const iframe =
+              document.createElement("iframe");
 
-        collabSource.appendChild(sourceText);
+            iframe.src =
+              String(sourceUrl).includes("?")
+                ? String(sourceUrl) + "&autoplay=1&muted=0&controls=1"
+                : String(sourceUrl) + "?autoplay=1&muted=0&controls=1";
+
+            iframe.allow =
+              "autoplay; fullscreen; picture-in-picture; encrypted-media";
+
+            iframe.allowFullscreen = true;
+            iframe.setAttribute(
+              "playsinline",
+              ""
+            );
+
+            collabSource.appendChild(iframe);
+
+          } else {
+            const video =
+              document.createElement("video");
+
+            video.src = sourceUrl;
+            video.controls = true;
+            video.autoplay = true;
+            video.playsInline = true;
+            video.preload = "metadata";
+
+            collabSource.appendChild(video);
+
+            video.play().catch(() => {});
+          }
+
+        } else {
+          const sourceText =
+            document.createElement("div");
+
+          sourceText.textContent =
+            sourceVideo?.title ||
+            "Original Short";
+
+          sourceText.style.cssText =
+            "padding:20px;color:#fff;text-align:center;";
+
+          collabSource.appendChild(sourceText);
+
+          console.warn(
+            "⚠️ Collab Original Short URL नहीं मिला:",
+            sourceVideo
+          );
+        }
       }
 
       console.log(
@@ -11945,1374 +11636,7 @@ window.videoApnaSelectedSound = null;
   })();
 
 
-  /*
-   * पहली बार Recording button bind करें।
-   */
-  (function () {
 
-    const button =
-      document.getElementById(
-        "collabRecordButton"
-      );
 
-    if (!button) {
-      return;
-    }
-
-    if (
-      button.dataset.collabRecorderBound === "1"
-    ) {
-      return;
-    }
-
-    button.dataset.collabRecorderBound = "1";
-
-    button.addEventListener(
-      "click",
-      function (event) {
-
-        event.preventDefault();
-        event.stopPropagation();
-
-        if (
-          window.videoApnaCollabRecorder &&
-          window.videoApnaCollabRecorder.state ===
-            "recording"
-        ) {
-
-          window.videoApnaStopCollabRecording();
-
-        } else {
-
-          window.videoApnaStartCollabRecording();
-
-        }
-
-      }
-    );
-
-  })();
-
-window.videoApnaLoadShorts =
-    loadShortsFeed;
-
-  // Shorts अब Home खुलते ही अपने-आप नहीं चलेगा।
-  // इसे सिर्फ Shorts खोलने पर videoApnaLoadShorts() से चलाया जाएगा.
-
-
-  window.videoApnaLoadShorts = loadShortsFeed;
-
-  // Shorts अब Home खुलते ही अपने-आप नहीं चलेगा।
-  // इसे सिर्फ Shorts खोलने पर videoApnaLoadShorts() से चलाया जाएगा।
-
-})();
-
-
-/* =========================================
-   VIDEOAPNA OWNER REPORT PANEL JS
-========================================= */
-
-let ownerReports = [];
-let ownerReportsLoading = false;
-
-
-/* Owner Panel खोलना */
-window.openOwnerPanel = async function () {
-  const section = document.getElementById("ownerPanelSection");
-
-  if (!section) {
-    console.error("Owner Panel section नहीं मिला।");
-    return;
-  }
-
-  section.classList.remove("hidden");
-
-  /* बाकी मुख्य sections छुपाएँ */
-  document.querySelectorAll("main > section").forEach(el => {
-    if (el.id !== "ownerPanelSection") {
-      el.classList.add("hidden");
-    }
-  });
-
-  await checkOwnerSession();
-};
-
-
-/* Owner session check */
-async function checkOwnerSession() {
-  const loginBox =
-    document.getElementById("ownerLoginBox");
-
-  const dashboardBox =
-    document.getElementById("ownerDashboardBox");
-
-  const message =
-    document.getElementById("ownerLoginMessage");
-
-  try {
-    const response =
-      await fetch("/api/owner/me", {
-        credentials: "same-origin"
-      });
-
-    const data = await response.json();
-
-    if (
-      response.ok &&
-      data.success &&
-      data.authenticated
-    ) {
-      loginBox?.classList.add("hidden");
-      dashboardBox?.classList.remove("hidden");
-
-      const email =
-        document.getElementById("ownerLoggedEmail");
-
-      if (email) {
-        email.textContent =
-          data.owner?.email || "";
-      }
-
-      await loadOwnerReports();
-
-    } else {
-      loginBox?.classList.remove("hidden");
-      dashboardBox?.classList.add("hidden");
-
-      if (message) {
-        message.textContent =
-          "Owner Login करें।";
-      }
-    }
-
-  } catch (error) {
-    console.error(
-      "OWNER SESSION CHECK ERROR:",
-      error
-    );
-
-    if (message) {
-      message.textContent =
-        "Owner Session check नहीं हो पाया।";
-    }
-  }
-}
-
-
-/* Owner Login */
-async function ownerLogin() {
-  const emailInput =
-    document.getElementById("ownerEmailInput");
-
-  const passwordInput =
-    document.getElementById("ownerPasswordInput");
-
-  const message =
-    document.getElementById("ownerLoginMessage");
-
-  const email =
-    String(emailInput?.value || "").trim();
-
-  const password =
-    String(passwordInput?.value || "");
-
-  if (!email || !password) {
-    if (message) {
-      message.textContent =
-        "Email और Password दोनों भरें।";
-    }
-    return;
-  }
-
-  const button =
-    document.getElementById("ownerLoginBtn");
-
-  if (button) {
-    button.disabled = true;
-    button.textContent = "⏳ Login हो रहा है...";
-  }
-
-  try {
-    const response =
-      await fetch("/api/owner/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        credentials: "same-origin",
-        body: JSON.stringify({
-          email,
-          password
-        })
-      });
-
-    const data =
-      await response.json();
-
-    if (!response.ok || !data.success) {
-      throw new Error(
-        data.message ||
-        "Owner Login failed"
-      );
-    }
-
-    if (message) {
-      message.textContent =
-        "✅ Owner Login सफल है।";
-    }
-
-    if (passwordInput) {
-      passwordInput.value = "";
-    }
-
-    await checkOwnerSession();
-
-  } catch (error) {
-    console.error(
-      "OWNER LOGIN ERROR:",
-      error
-    );
-
-    if (message) {
-      message.textContent =
-        "❌ " + error.message;
-    }
-
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.textContent = "🔐 Owner Login";
-    }
-  }
-}
-
-
-/* Owner Logout */
-async function ownerLogout() {
-  try {
-    const response =
-      await fetch("/api/owner/logout", {
-        method: "POST",
-        credentials: "same-origin"
-      });
-
-    const data =
-      await response.json();
-
-    if (!response.ok || !data.success) {
-      throw new Error(
-        data.message ||
-        "Logout failed"
-      );
-    }
-
-    ownerReports = [];
-
-    const list =
-      document.getElementById("ownerReportsList");
-
-    if (list) {
-      list.innerHTML = "";
-    }
-
-    document
-      .getElementById("ownerDashboardBox")
-      ?.classList.add("hidden");
-
-    document
-      .getElementById("ownerLoginBox")
-      ?.classList.remove("hidden");
-
-    const message =
-      document.getElementById("ownerLoginMessage");
-
-    if (message) {
-      message.textContent =
-        "✅ Owner Logout हो गया।";
-    }
-
-  } catch (error) {
-    console.error(
-      "OWNER LOGOUT ERROR:",
-      error
-    );
-
-    alert(
-      "Logout में समस्या हुई: " +
-      error.message
-    );
-  }
-}
-
-
-/* Reports load */
-async function loadOwnerReports() {
-  if (ownerReportsLoading) return;
-
-  ownerReportsLoading = true;
-
-  const message =
-    document.getElementById("ownerReportsMessage");
-
-  if (message) {
-    message.textContent =
-      "⏳ Reports लोड हो रही हैं...";
-  }
-
-  try {
-    const response =
-      await fetch("/api/owner/reports", {
-        credentials: "same-origin"
-      });
-
-    const data =
-      await response.json();
-
-    if (response.status === 401) {
-      await checkOwnerSession();
-      return;
-    }
-
-    if (!response.ok || !data.success) {
-      throw new Error(
-        data.message ||
-        "Reports load failed"
-      );
-    }
-
-    ownerReports =
-      Array.isArray(data.reports)
-        ? data.reports
-        : [];
-
-    updateOwnerReportSummary();
-    renderOwnerReports();
-
-  } catch (error) {
-    console.error(
-      "OWNER REPORT LOAD ERROR:",
-      error
-    );
-
-    if (message) {
-      message.textContent =
-        "❌ Reports load नहीं हो पाईं: " +
-        error.message;
-    }
-
-  } finally {
-    ownerReportsLoading = false;
-  }
-}
-
-
-/* Summary */
-function updateOwnerReportSummary() {
-  const total =
-    ownerReports.length;
-
-  const pending =
-    ownerReports.filter(
-      r => String(r.status || "pending") === "pending"
-    ).length;
-
-  const resolved =
-    ownerReports.filter(
-      r => String(r.status || "") === "resolved"
-    ).length;
-
-  const rejected =
-    ownerReports.filter(
-      r => String(r.status || "") === "rejected"
-    ).length;
-
-  const totalEl =
-    document.getElementById("ownerTotalReports");
-
-  const pendingEl =
-    document.getElementById("ownerPendingReports");
-
-  const resolvedEl =
-    document.getElementById("ownerResolvedReports");
-
-  const rejectedEl =
-    document.getElementById("ownerRejectedReports");
-
-  if (totalEl) totalEl.textContent = total;
-  if (pendingEl) pendingEl.textContent = pending;
-  if (resolvedEl) resolvedEl.textContent = resolved;
-  if (rejectedEl) rejectedEl.textContent = rejected;
-}
-
-
-/* HTML safe text */
-function ownerEscapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-
-/* Reports render */
-function renderOwnerReports() {
-  const list =
-    document.getElementById("ownerReportsList");
-
-  const filter =
-    document.getElementById("ownerReportFilter")
-      ?.value || "all";
-
-  const message =
-    document.getElementById("ownerReportsMessage");
-
-  if (!list) return;
-
-  let reports =
-    ownerReports.slice();
-
-  if (filter !== "all") {
-    reports =
-      reports.filter(
-        r =>
-          String(r.status || "pending") === filter
-      );
-  }
-
-  if (!reports.length) {
-    list.innerHTML =
-      '<div class="owner-no-reports">📭 इस filter में कोई Report नहीं है।</div>';
-
-    if (message) {
-      message.textContent =
-        "Reports: 0";
-    }
-
-    return;
-  }
-
-  if (message) {
-    message.textContent =
-      "Reports: " + reports.length;
-  }
-
-  list.innerHTML =
-    reports.map(report => {
-
-      const status =
-        String(report.status || "pending");
-
-      const source =
-        String(report.source || "videoapna");
-
-      const created =
-        report.createdAt
-          ? new Date(report.createdAt)
-              .toLocaleString("hi-IN")
-          : "समय उपलब्ध नहीं";
-
-      const reviewed =
-        report.reviewedAt
-          ? new Date(report.reviewedAt)
-              .toLocaleString("hi-IN")
-          : "";
-
-      const statusLabel =
-        status === "pending"
-          ? "🟡 Pending"
-          : status === "resolved"
-          ? "🟢 Resolved"
-          : status === "rejected"
-          ? "🔴 Rejected"
-          : status;
-
-      const isPending =
-        status === "pending";
-
-      const actionButtons =
-        isPending
-          ? `
-            <div class="owner-report-actions">
-
-              <button
-                type="button"
-                class="owner-action-private"
-                data-report-id="${ownerEscapeHtml(report.id)}"
-              >
-                🔒 Private
-              </button>
-
-              <button
-                type="button"
-                class="owner-action-delete"
-                data-report-id="${ownerEscapeHtml(report.id)}"
-              >
-                🗑️ Delete
-              </button>
-
-              <button
-                type="button"
-                class="owner-action-resolve"
-                data-report-id="${ownerEscapeHtml(report.id)}"
-              >
-                ✅ Resolve
-              </button>
-
-              <button
-                type="button"
-                class="owner-action-reject"
-                data-report-id="${ownerEscapeHtml(report.id)}"
-              >
-                ❌ Reject
-              </button>
-
-            </div>
-          `
-          : `
-            <div class="owner-report-actions">
-
-              ${
-                status === "resolved"
-                  ? `
-                    <button
-                      type="button"
-                      class="owner-action-restore"
-                      data-report-id="${ownerEscapeHtml(report.id)}"
-                    >
-                      ♻️ Restore
-                    </button>
-                  `
-                  : ""
-              }
-
-            </div>
-          `;
-
-      return `
-        <article class="owner-report-card">
-
-          <div class="owner-report-card-top">
-
-            <strong>
-              🚩 ${ownerEscapeHtml(
-                report.videoTitle || "Unknown Video"
-              )}
-            </strong>
-
-            <span class="owner-report-status">
-              ${ownerEscapeHtml(statusLabel)}
-            </span>
-
-          </div>
-
-          <div class="owner-report-info">
-
-            <p>
-              <strong>Video ID:</strong>
-              ${ownerEscapeHtml(report.videoId)}
-            </p>
-
-            <p>
-              <strong>Source:</strong>
-              ${ownerEscapeHtml(source)}
-            </p>
-
-            <p>
-              <strong>Reporter:</strong>
-              ${ownerEscapeHtml(report.reporterUserId)}
-            </p>
-
-            <p>
-              <strong>Reason:</strong>
-              ${ownerEscapeHtml(report.reason)}
-            </p>
-
-            ${
-              report.details
-                ? `
-                  <p>
-                    <strong>Details:</strong>
-                    ${ownerEscapeHtml(report.details)}
-                  </p>
-                `
-                : ""
-            }
-
-            <p>
-              <strong>Report Time:</strong>
-              ${ownerEscapeHtml(created)}
-            </p>
-
-            ${
-              report.action
-                ? `
-                  <p>
-                    <strong>Action:</strong>
-                    ${ownerEscapeHtml(report.action)}
-                  </p>
-                `
-                : ""
-            }
-
-            ${
-              report.moderatorNote
-                ? `
-                  <p>
-                    <strong>Owner Note:</strong>
-                    ${ownerEscapeHtml(report.moderatorNote)}
-                  </p>
-                `
-                : ""
-            }
-
-            ${
-              reviewed
-                ? `
-                  <p>
-                    <strong>Reviewed:</strong>
-                    ${ownerEscapeHtml(reviewed)}
-                  </p>
-                `
-                : ""
-            }
-
-          </div>
-
-          ${actionButtons}
-
-        </article>
-      `;
-    }).join("");
-}
-
-
-/* Moderation action */
-async function ownerReportAction(
-  reportId,
-  action
-) {
-  const report =
-    ownerReports.find(
-      r => String(r.id) === String(reportId)
-    );
-
-  if (!report) {
-    alert("Report नहीं मिली।");
-    return;
-  }
-
-  let note = "";
-
-  if (
-    action === "private" ||
-    action === "delete" ||
-    action === "reject"
-  ) {
-    note =
-      window.prompt(
-        "Owner Note लिखें:",
-        ""
-      );
-
-    if (note === null) {
-      return;
-    }
-  }
-
-  if (action === "delete") {
-    const ok =
-      window.confirm(
-        "क्या आप इस Video को सच में Delete करना चाहते हैं?"
-      );
-
-    if (!ok) return;
-  }
-
-  try {
-    const response =
-      await fetch(
-        "/api/owner/reports/" +
-        encodeURIComponent(reportId) +
-        "/action",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          credentials: "same-origin",
-          body: JSON.stringify({
-            action,
-            moderatorNote: note
-          })
-        }
-      );
-
-    const data =
-      await response.json();
-
-    if (response.status === 401) {
-      alert("Owner Login जरूरी है।");
-      await checkOwnerSession();
-      return;
-    }
-
-    if (!response.ok || !data.success) {
-      throw new Error(
-        data.message ||
-        "Moderation action failed"
-      );
-    }
-
-    alert(
-      "✅ " +
-      (data.message || "Action सफल है।")
-    );
-
-    await loadOwnerReports();
-
-  } catch (error) {
-    console.error(
-      "OWNER REPORT ACTION ERROR:",
-      error
-    );
-
-    alert(
-      "❌ Action नहीं हो पाया: " +
-      error.message
-    );
-  }
-}
-
-
-/* Buttons */
-document.addEventListener(
-  "click",
-  event => {
-
-    const loginBtn =
-      event.target.closest(
-        "#ownerLoginBtn"
-      );
-
-    if (loginBtn) {
-      ownerLogin();
-      return;
-    }
-
-    const logoutBtn =
-      event.target.closest(
-        "#ownerLogoutBtn"
-      );
-
-    if (logoutBtn) {
-      ownerLogout();
-      return;
-    }
-
-    const refreshBtn =
-      event.target.closest(
-        "#ownerRefreshReportsBtn"
-      );
-
-    if (refreshBtn) {
-      loadOwnerReports();
-      return;
-    }
-
-    const privateBtn =
-      event.target.closest(
-        ".owner-action-private"
-      );
-
-    if (privateBtn) {
-      ownerReportAction(
-        privateBtn.dataset.reportId,
-        "private"
-      );
-      return;
-    }
-
-    const deleteBtn =
-      event.target.closest(
-        ".owner-action-delete"
-      );
-
-    if (deleteBtn) {
-      ownerReportAction(
-        deleteBtn.dataset.reportId,
-        "delete"
-      );
-      return;
-    }
-
-    const resolveBtn =
-      event.target.closest(
-        ".owner-action-resolve"
-      );
-
-    if (resolveBtn) {
-      ownerReportAction(
-        resolveBtn.dataset.reportId,
-        "resolve"
-      );
-      return;
-    }
-
-    const rejectBtn =
-      event.target.closest(
-        ".owner-action-reject"
-      );
-
-    if (rejectBtn) {
-      ownerReportAction(
-        rejectBtn.dataset.reportId,
-        "reject"
-      );
-      return;
-    }
-
-    const restoreBtn =
-      event.target.closest(
-        ".owner-action-restore"
-      );
-
-    if (restoreBtn) {
-      ownerReportAction(
-        restoreBtn.dataset.reportId,
-        "restore"
-      );
-      return;
-    }
-
-  },
-  true
-);
-
-
-/* Filter */
-document.addEventListener(
-  "change",
-  event => {
-
-    if (
-      event.target &&
-      event.target.id === "ownerReportFilter"
-    ) {
-      renderOwnerReports();
-    }
-
-  },
-  true
-);
-
-
-/* Back button */
-document.addEventListener(
-  "click",
-  event => {
-
-    const backBtn =
-      event.target.closest(
-        "#ownerPanelBack"
-      );
-
-    if (!backBtn) return;
-
-    document
-      .getElementById("ownerPanelSection")
-      ?.classList.add("hidden");
-
-    /* Home वापस */
-    if (typeof window.showHome === "function") {
-      window.showHome();
-    } else {
-      document
-        .querySelector("main > section")
-        ?.classList.remove("hidden");
-    }
-
-  },
-  true
-);
-
-
-
-
-  const openOwnerPanelBtn =
-    document.getElementById("openOwnerPanelBtn");
-
-  if (openOwnerPanelBtn) {
-    openOwnerPanelBtn.addEventListener("click", () => {
-      if (typeof window.openOwnerPanel === "function") {
-        window.openOwnerPanel();
-      } else {
-        console.error("openOwnerPanel function नहीं मिला।");
-      }
-    });
-  }
-
-
-
-/* =========================================
-   VIDEOAPNA PUBLIC ACCOUNT UI
-========================================= */
-(function initVideoApnaPublicAccount() {
-
-  function showAccountMessage(message, success = false) {
-    const el = document.getElementById("publicAccountMessage");
-    if (!el) return;
-
-    el.textContent = message;
-    el.style.display = "block";
-    el.style.color = success ? "#15803d" : "#b91c1c";
-  }
-
-  function setAccountUI(authenticated, user) {
-    const loggedOut =
-      document.getElementById("publicAccountLoggedOut");
-
-    const loggedIn =
-      document.getElementById("publicAccountLoggedIn");
-
-    const status =
-      document.getElementById("publicAccountStatus");
-
-    const emailText =
-      document.getElementById("publicAccountEmailText");
-
-    if (!loggedOut || !loggedIn) return;
-
-    if (authenticated && user) {
-      loggedOut.classList.add("hidden");
-      loggedIn.classList.remove("hidden");
-
-      if (emailText) {
-        emailText.textContent = user.email || "";
-      }
-
-      if (status) {
-        status.textContent =
-          "✅ आपका VideoApna Account Login है। अब आप अपना वीडियो Upload कर सकते हैं।";
-      }
-    } else {
-      loggedOut.classList.remove("hidden");
-      loggedIn.classList.add("hidden");
-
-      if (status) {
-        status.textContent =
-          "वीडियो देखने के लिए Login जरूरी नहीं है। अपना वीडियो Upload करने के लिए Account बनाइए।";
-      }
-    }
-  }
-
-  async function checkPublicAccount() {
-    try {
-      const response = await fetch("/api/auth/me", {
-        credentials: "include"
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success && data.authenticated) {
-        setAccountUI(true, data.user);
-      } else {
-        setAccountUI(false, null);
-      }
-
-    } catch (error) {
-      console.error("PUBLIC ACCOUNT ME ERROR:", error);
-      setAccountUI(false, null);
-    }
-  }
-
-  async function registerPublicAccount() {
-
-    const name =
-      (document.getElementById("publicAccountName")?.value || "").trim();
-
-    const email =
-      (document.getElementById("publicAccountEmail")?.value || "").trim();
-
-    const password =
-      document.getElementById("publicAccountPassword")?.value || "";
-
-    if (!email) {
-      showAccountMessage("❌ Email डालिए।");
-      return;
-    }
-
-    if (password.length < 8) {
-      showAccountMessage("❌ Password कम से कम 8 अक्षर का होना चाहिए।");
-      return;
-    }
-
-    showAccountMessage("⏳ Account बनाया जा रहा है...", true);
-
-    try {
-
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          email,
-          password,
-          displayName: name || "VideoApna User"
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        showAccountMessage(
-          "❌ " + (data.message || "Account नहीं बन पाया।")
-        );
-        return;
-      }
-
-      showAccountMessage(
-        "✅ Account सफलतापूर्वक बन गया।",
-        true
-      );
-
-      setAccountUI(true, data.user);
-
-      const passwordInput =
-        document.getElementById("publicAccountPassword");
-
-      if (passwordInput) {
-        passwordInput.value = "";
-      }
-
-    } catch (error) {
-
-      console.error("PUBLIC REGISTER ERROR:", error);
-
-      showAccountMessage(
-        "❌ Server से connection नहीं हो पाया।"
-      );
-    }
-  }
-
-  async function loginPublicAccount() {
-
-    const email =
-      (document.getElementById("publicAccountEmail")?.value || "").trim();
-
-    const password =
-      document.getElementById("publicAccountPassword")?.value || "";
-
-    if (!email || !password) {
-      showAccountMessage("❌ Email और Password दोनों डालिए।");
-      return;
-    }
-
-    showAccountMessage("⏳ Login हो रहा है...", true);
-
-    try {
-
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          email,
-          password
-        })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        showAccountMessage(
-          "❌ " + (data.message || "Login नहीं हुआ।")
-        );
-        return;
-      }
-
-      showAccountMessage(
-        "✅ Login सफल है।",
-        true
-      );
-
-      setAccountUI(true, data.user);
-
-      const passwordInput =
-        document.getElementById("publicAccountPassword");
-
-      if (passwordInput) {
-        passwordInput.value = "";
-      }
-
-    } catch (error) {
-
-      console.error("PUBLIC LOGIN ERROR:", error);
-
-      showAccountMessage(
-        "❌ Server से connection नहीं हो पाया।"
-      );
-    }
-  }
-
-  async function logoutPublicAccount() {
-
-    try {
-
-      const response = await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include"
-      });
-
-      const data = await response.json();
-
-      if (!response.ok || !data.success) {
-        showAccountMessage(
-          "❌ Logout नहीं हो पाया।"
-        );
-        return;
-      }
-
-      setAccountUI(false, null);
-
-      showAccountMessage(
-        "✅ Logout सफल है।",
-        true
-      );
-
-    } catch (error) {
-
-      console.error("PUBLIC LOGOUT ERROR:", error);
-
-      showAccountMessage(
-        "❌ Server से connection नहीं हो पाया।"
-      );
-    }
-  }
-
-  function bindPublicAccountButtons() {
-
-    const registerBtn =
-      document.getElementById("publicAccountRegisterBtn");
-
-    const loginBtn =
-      document.getElementById("publicAccountLoginBtn");
-
-    const logoutBtn =
-      document.getElementById("publicAccountLogoutBtn");
-
-    const forgotBtn =
-      document.getElementById("publicAccountForgotBtn");
-
-    if (registerBtn && !registerBtn.dataset.accountBound) {
-      registerBtn.dataset.accountBound = "1";
-      registerBtn.addEventListener(
-        "click",
-        registerPublicAccount
-      );
-    }
-
-    if (loginBtn && !loginBtn.dataset.accountBound) {
-      loginBtn.dataset.accountBound = "1";
-      loginBtn.addEventListener(
-        "click",
-        loginPublicAccount
-      );
-    }
-
-    if (logoutBtn && !logoutBtn.dataset.accountBound) {
-      logoutBtn.dataset.accountBound = "1";
-      logoutBtn.addEventListener(
-        "click",
-        logoutPublicAccount
-      );
-    }
-
-    if (forgotBtn && !forgotBtn.dataset.accountBound) {
-      forgotBtn.dataset.accountBound = "1";
-      forgotBtn.addEventListener("click", function () {
-        showAccountMessage(
-          "ℹ️ Password Recovery जल्द जोड़ा जाएगा।"
-        );
-      });
-    }
-  }
-
-  function initPublicAccount() {
-    bindPublicAccountButtons();
-    checkPublicAccount();
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener(
-      "DOMContentLoaded",
-      initPublicAccount
-    );
-  } else {
-    initPublicAccount();
-  }
-
-  window.initVideoApnaPublicAccount =
-    initPublicAccount;
-
-})();
-
-/* =========================================================
-   VIDEOAPNA LONG VIDEO / PHOTO SHORT MODE
-   ========================================================= */
-(function () {
-
-  const longBtn =
-    document.getElementById("longVideoModeBtn");
-
-  const photoBtn =
-    document.getElementById("photoVideoModeBtn");
-
-  const photoMode =
-    document.getElementById("photoVideoMode");
-
-  const uploadBox =
-    document.querySelector("#uploadModal .upload-box");
-
-  if (!longBtn || !photoBtn || !photoMode || !uploadBox) {
-    console.log("UPLOAD MODE SELECTOR: ELEMENT MISSING");
-    return;
-  }
-
-  /*
-   * Long Video के पुराने controls.
-   * Photo Mode के अंदर मौजूद controls को छोड़कर
-   * upload-header से नीचे के long-video elements छिपाएँ/दिखाएँ।
-   */
-  const longElements = [
-    uploadBox.querySelector(".upload-header"),
-    document.getElementById("videoFile")?.closest(".file-label"),
-    document.getElementById("videoPreview"),
-    document.getElementById("uploadTitle"),
-    document.getElementById("uploadDescription"),
-    document.getElementById("uploadCategory"),
-    document.getElementById("templatePicker"),
-    document.getElementById("soundPicker"),
-    document.getElementById("publishBtn"),
-    document.getElementById("uploadMessage")
-  ].filter(Boolean);
-
-  function setMode(mode) {
-
-    const photo =
-      mode === "photo";
-
-    photoMode.classList.toggle(
-      "hidden",
-      !photo
-    );
-
-    longElements.forEach(function (element) {
-      element.style.display =
-        photo ? "none" : "";
-    });
-
-    longBtn.classList.toggle(
-      "active",
-      !photo
-    );
-
-    photoBtn.classList.toggle(
-      "active",
-      photo
-    );
-
-    console.log(
-      "UPLOAD MODE:",
-      photo ? "PHOTO SHORT" : "LONG VIDEO"
-    );
-  }
-
-  longBtn.addEventListener(
-    "click",
-    function () {
-      setMode("long");
-    }
-  );
-
-  photoBtn.addEventListener(
-    "click",
-    function () {
-      setMode("photo");
-    }
-  );
-
-  /* Upload खुलने पर Long Video default रहेगा */
-  setMode("long");
-
-})();
-
-/* =========================================================
-   VIDEOAPNA ANDROID FILE PICKER FIX
-   Visible Button -> Hidden File Input
-========================================================= */
-(function () {
-
-  const photoButton =
-    document.getElementById("photoSelectButton");
-
-  const photoInput =
-    document.getElementById("photoVideoInput");
-
-  const videoButton =
-    document.getElementById("videoSelectButton");
-
-  const videoInput =
-    document.getElementById("videoFile");
-
-  if (photoButton && photoInput) {
-    photoButton.addEventListener("click", function () {
-      console.log("PHOTO FILE PICKER OPEN");
-      photoInput.click();
-    });
-  }
-
-  if (videoButton && videoInput) {
-    videoButton.addEventListener("click", function () {
-      console.log("VIDEO FILE PICKER OPEN");
-      videoInput.click();
-    });
-  }
-
-})();
-
-/* =========================================================
-   VIDEOAPNA PROFILE PHOTO FILE PICKER
-========================================================= */
-(function () {
-
-  const button =
-    document.getElementById("profilePhotoButton");
-
-  const input =
-    document.getElementById("profilePhotoInput");
-
-  if (!button || !input) {
-    console.log("PROFILE PHOTO PICKER: ELEMENT MISSING");
-    return;
-  }
-
-  if (!button.dataset.filePickerBound) {
-
-    button.dataset.filePickerBound = "1";
-
-    button.addEventListener("click", function () {
-
-      console.log("PROFILE PHOTO FILE PICKER OPEN");
-
-      input.click();
-
-    });
-  }
 
 })();

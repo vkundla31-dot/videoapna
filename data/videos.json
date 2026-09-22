@@ -44,7 +44,14 @@
     "createdAt": "2026-09-17T11:33:18.972Z",
     "source": "videoapna",
     "contentType": "short",
-    "remixAllowed": true
+    "remixAllowed": true,
+    "vcdnVideoId": "2887b454-be48-4a19-b360-f499eb25dd4f",
+    "vcdnUploadId": "2887b454-be48-4a19-b360-f499eb25dd4f",
+    "vcdnStatus": "ready",
+    "vcdnPlaybackUrl": "https://storage.vcdn.me/vcdn-hls/videos/2887b454-be48-4a19-b360-f499eb25dd4f/master.m3u8",
+    "vcdnEmbedUrl": "https://embed.vcdn.me/embed/2887b454-be48-4a19-b360-f499eb25dd4f",
+    "embedUrl": "https://embed.vcdn.me/embed/2887b454-be48-4a19-b360-f499eb25dd4f",
+    "posterUrl": "https://storage.vcdn.me/vcdn-hls/videos/2887b454-be48-4a19-b360-f499eb25dd4f/poster.jpg"
   },
   {
     "id": 1787763314406,
@@ -60,6 +67,13 @@
     "likes": 1,
     "source": "videoapna",
     "contentType": "short",
-    "remixAllowed": true
+    "remixAllowed": true,
+    "vcdnVideoId": "ec082201-97ac-4f95-be02-9433b4302812",
+    "vcdnUploadId": "ec082201-97ac-4f95-be02-9433b4302812",
+    "vcdnStatus": "ready",
+    "vcdnPlaybackUrl": "https://storage.vcdn.me/vcdn-hls/videos/ec082201-97ac-4f95-be02-9433b4302812/master.m3u8",
+    "vcdnEmbedUrl": "https://embed.vcdn.me/embed/ec082201-97ac-4f95-be02-9433b4302812",
+    "embedUrl": "https://embed.vcdn.me/embed/ec082201-97ac-4f95-be02-9433b4302812",
+    "posterUrl": "https://storage.vcdn.me/vcdn-hls/videos/ec082201-97ac-4f95-be02-9433b4302812/poster.jpg"
   }
 ]
