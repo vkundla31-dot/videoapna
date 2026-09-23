@@ -1,6 +1,7 @@
 const puppeteer = require("puppeteer");
 const fs = require("fs");
 const http = require("http");
+const path = require("path");
 
 const chromePath =
   process.env.PUPPETEER_EXECUTABLE_PATH || "";
@@ -8,6 +9,61 @@ const chromePath =
 const VIDEO_IDS = [
   "kgBvRi0Dc2o"
 ];
+
+const PLAYABILITY_CACHE_FILE =
+  path.join(
+    __dirname,
+    "data",
+    "youtube-playability-test-cache.json"
+  );
+
+let playabilityCache = {};
+
+try {
+  if (fs.existsSync(PLAYABILITY_CACHE_FILE)) {
+    const text = fs.readFileSync(
+      PLAYABILITY_CACHE_FILE,
+      "utf8"
+    );
+
+    const parsed = JSON.parse(text);
+
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
+      playabilityCache = parsed;
+    }
+  }
+} catch (error) {
+  console.warn(
+    "PLAYABILITY CACHE LOAD FAILED:",
+    error.message
+  );
+}
+
+function savePlayabilityCache() {
+  try {
+    fs.mkdirSync(
+      path.dirname(PLAYABILITY_CACHE_FILE),
+      { recursive: true }
+    );
+
+    fs.writeFileSync(
+      PLAYABILITY_CACHE_FILE,
+      JSON.stringify(playabilityCache, null, 2),
+      "utf8"
+    );
+
+    console.log("✅ PLAYABILITY CACHE SAVED");
+  } catch (error) {
+    console.warn(
+      "PLAYABILITY CACHE SAVE FAILED:",
+      error.message
+    );
+  }
+}
 
 
 async function checkYouTubeEmbedPlayable(browser, videoId) {
@@ -133,11 +189,32 @@ async function checkYouTubeEmbedPlayable(browser, videoId) {
       console.log("CHECKING VIDEO:", videoId);
       console.log("========================================");
 
+      const cachedResult =
+        playabilityCache[String(videoId)];
+
+      if (cachedResult) {
+        console.log("♻️ CACHE HIT:", videoId);
+        console.log(
+          "CHECK RESULT:",
+          JSON.stringify(cachedResult)
+        );
+        continue;
+      }
+
+      console.log("🌐 CACHE MISS:", videoId);
+
       const result =
         await checkYouTubeEmbedPlayable(
           browser,
           videoId
         );
+
+      playabilityCache[String(videoId)] = {
+        ...result,
+        checkedAt: new Date().toISOString()
+      };
+
+      savePlayabilityCache();
 
       console.log(
         "CHECK RESULT:",
