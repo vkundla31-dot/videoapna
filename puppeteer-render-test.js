@@ -1,6 +1,7 @@
 const puppeteer = require("puppeteer");
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
 
 (async () => {
   console.log("========== VIDEOAPNA PUPPETEER RENDER TEST ==========");
@@ -50,6 +51,17 @@ const path = require("path");
     await browser.close();
 
     console.log("✅ BROWSER TEST PASSED");
+
+    const port = Number(process.env.PORT || 10000);
+
+    http.createServer(function(req, res) {
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8"
+      });
+      res.end("VideoApna Puppeteer test is running.\\n");
+    }).listen(port, "0.0.0.0", function() {
+      console.log("✅ TEST SERVER LISTENING:", port);
+    });
   } catch (error) {
     console.error("❌ BROWSER TEST FAILED");
     console.error(error);
