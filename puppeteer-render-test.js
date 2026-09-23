@@ -7,8 +7,8 @@ const chromePath =
   process.env.PUPPETEER_EXECUTABLE_PATH || "";
 
 const VIDEO_IDS = [
-  "ApQF1-6ZNGo",
-  "ApQF1-6ZNGo"
+  "kqQaME_vOsg",
+  "kqQaME_vOsg"
 ];
 
 const PLAYABILITY_CACHE_FILE =
