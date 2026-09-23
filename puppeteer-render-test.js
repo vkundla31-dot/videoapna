@@ -1,4 +1,6 @@
 const puppeteer = require("puppeteer");
+const fs = require("fs");
+const path = require("path");
 
 (async () => {
   console.log("========== VIDEOAPNA PUPPETEER RENDER TEST ==========");
@@ -9,7 +11,17 @@ const puppeteer = require("puppeteer");
       require("puppeteer/package.json").version
     );
 
+    const chromePath =
+      process.env.PUPPETEER_EXECUTABLE_PATH || "";
+
+    console.log("Chrome path:", chromePath);
+    console.log(
+      "Chrome exists:",
+      chromePath ? fs.existsSync(chromePath) : false
+    );
+
     const browser = await puppeteer.launch({
+      ...(chromePath ? { executablePath: chromePath } : {}),
       headless: true,
       args: [
         "--no-sandbox",
