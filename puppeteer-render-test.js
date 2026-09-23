@@ -7,6 +7,98 @@ const chromePath =
 
 const VIDEO_ID = "kgBvRi0Dc2o";
 
+
+async function checkYouTubeEmbedPlayable(browser, videoId) {
+  const id = String(videoId || "").trim();
+
+  if (!id) {
+    return {
+      playable: false,
+      reason: "missing_video_id"
+    };
+  }
+
+  const page = await browser.newPage();
+
+  try {
+    await page.setViewport({
+      width: 1280,
+      height: 720
+    });
+
+    const embedUrl =
+      "https://www.youtube.com/embed/" +
+      encodeURIComponent(id) +
+      "?autoplay=1&mute=1&playsinline=1";
+
+    await page.goto(embedUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 30000
+    });
+
+    await new Promise(function(resolve) {
+      setTimeout(resolve, 8000);
+    });
+
+    const result = await page.evaluate(function() {
+      const text =
+        String(document.body?.innerText || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .toLowerCase();
+
+      const blockedPatterns = [
+        "watch video on youtube",
+        "watch on youtube",
+        "youtube पर देखें",
+        "youtube पर जाने के लिए क्लिक करें",
+        "video unavailable",
+        "this video is unavailable",
+        "यह वीडियो उपलब्ध नहीं है",
+        "error 153",
+        "error 163"
+      ];
+
+      const blockedPattern =
+        blockedPatterns.find(function(pattern) {
+          return text.includes(pattern);
+        }) || "";
+
+      return {
+        blocked: Boolean(blockedPattern),
+        reason: blockedPattern,
+        text: text.slice(0, 5000)
+      };
+    });
+
+    if (result.blocked) {
+      return {
+        playable: false,
+        reason: result.reason,
+        text: result.text
+      };
+    }
+
+    return {
+      playable: true,
+      reason: "",
+      text: result.text
+    };
+
+  } catch (error) {
+    return {
+      playable: false,
+      reason: "puppeteer_error",
+      error: String(error && error.message || error)
+    };
+
+  } finally {
+    try {
+      await page.close();
+    } catch (e) {}
+  }
+}
+
 (async () => {
   console.log("VIDEOAPNA YOUTUBE PLAYER TEST");
   console.log("Puppeteer:", puppeteer.version);
@@ -29,6 +121,19 @@ const VIDEO_ID = "kgBvRi0Dc2o";
         "--disable-dev-shm-usage"
       ]
     });
+
+    console.log("RUNNING REUSABLE YOUTUBE CHECKER...");
+
+    const reusableResult =
+      await checkYouTubeEmbedPlayable(
+        browser,
+        VIDEO_ID
+      );
+
+    console.log(
+      "REUSABLE CHECK RESULT:",
+      JSON.stringify(reusableResult)
+    );
 
     const page = await browser.newPage();
 
