@@ -83,6 +83,35 @@ const VIDEO_ID = "kgBvRi0Dc2o";
     console.log("PLAYER URL:", pageInfo.url);
     console.log("PLAYER TITLE:", pageInfo.title);
     console.log("PLAYER HTML LENGTH:", pageInfo.htmlLength);
+    const playerText =
+      String(pageInfo.bodyText || "")
+        .replace(/\\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    const blockedPatterns = [
+      "watch video on youtube",
+      "watch on youtube",
+      "youtube पर देखें",
+      "youtube पर जाने के लिए क्लिक करें",
+      "video unavailable",
+      "this video is unavailable",
+      "यह वीडियो उपलब्ध नहीं है",
+      "error 163"
+    ];
+
+    const blockedPattern =
+      blockedPatterns.find(function(pattern) {
+        return playerText.includes(pattern);
+      }) || "";
+
+    if (blockedPattern) {
+      console.log("❌ YOUTUBE PLAYBACK BLOCKED");
+      console.log("BLOCK REASON:", blockedPattern);
+    } else {
+      console.log("✅ YOUTUBE PLAYBACK NOT BLOCKED");
+    }
+
     console.log("PLAYER TEXT:");
     console.log(pageInfo.bodyText.slice(0, 5000));
 
