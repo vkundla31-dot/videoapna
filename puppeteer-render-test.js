@@ -5,7 +5,9 @@ const http = require("http");
 const chromePath =
   process.env.PUPPETEER_EXECUTABLE_PATH || "";
 
-const VIDEO_ID = "kgBvRi0Dc2o";
+const VIDEO_IDS = [
+  "kgBvRi0Dc2o"
+];
 
 
 async function checkYouTubeEmbedPlayable(browser, videoId) {
@@ -107,6 +109,7 @@ async function checkYouTubeEmbedPlayable(browser, videoId) {
     "Chrome exists:",
     chromePath ? fs.existsSync(chromePath) : false
   );
+  const VIDEO_ID = VIDEO_IDS[0];
   console.log("Testing YouTube video:", VIDEO_ID);
 
   let browser;
@@ -124,108 +127,23 @@ async function checkYouTubeEmbedPlayable(browser, videoId) {
 
     console.log("RUNNING REUSABLE YOUTUBE CHECKER...");
 
-    const reusableResult =
-      await checkYouTubeEmbedPlayable(
-        browser,
-        VIDEO_ID
-      );
+    for (const videoId of VIDEO_IDS) {
+      console.log("");
+      console.log("========================================");
+      console.log("CHECKING VIDEO:", videoId);
+      console.log("========================================");
 
-    console.log(
-      "REUSABLE CHECK RESULT:",
-      JSON.stringify(reusableResult)
-    );
+      const result =
+        await checkYouTubeEmbedPlayable(
+          browser,
+          videoId
+        );
 
-    const page = await browser.newPage();
-
-    await page.setViewport({
-      width: 1280,
-      height: 720
-    });
-
-    page.on("console", msg => {
-      console.log("PAGE:", msg.text());
-    });
-
-    page.on("requestfailed", request => {
       console.log(
-        "REQUEST FAILED:",
-        request.url(),
-        "|",
-        request.failure()?.errorText || ""
+        "CHECK RESULT:",
+        JSON.stringify(result)
       );
-    });
-
-    const embedUrl =
-      "https://www.youtube.com/embed/" +
-      encodeURIComponent(VIDEO_ID) +
-      "?autoplay=1&mute=1&playsinline=1";
-
-    console.log("Opening:", embedUrl);
-
-    await page.goto(embedUrl, {
-      waitUntil: "domcontentloaded",
-      timeout: 30000
-    });
-
-    console.log("Page loaded");
-    console.log("Title:", await page.title());
-
-    await new Promise(resolve => setTimeout(resolve, 8000));
-
-    const pageInfo = await page.evaluate(() => {
-      return {
-        url: location.href,
-        title: document.title,
-        bodyText: document.body
-          ? document.body.innerText
-          : "",
-        htmlLength: document.documentElement
-          ? document.documentElement.outerHTML.length
-          : 0
-      };
-    });
-
-    console.log("PLAYER URL:", pageInfo.url);
-    console.log("PLAYER TITLE:", pageInfo.title);
-    console.log("PLAYER HTML LENGTH:", pageInfo.htmlLength);
-    const playerText =
-      String(pageInfo.bodyText || "")
-        .replace(/\\s+/g, " ")
-        .trim()
-        .toLowerCase();
-
-    const blockedPatterns = [
-      "watch video on youtube",
-      "watch on youtube",
-      "youtube पर देखें",
-      "youtube पर जाने के लिए क्लिक करें",
-      "video unavailable",
-      "this video is unavailable",
-      "यह वीडियो उपलब्ध नहीं है",
-      "error 163"
-    ];
-
-    const blockedPattern =
-      blockedPatterns.find(function(pattern) {
-        return playerText.includes(pattern);
-      }) || "";
-
-    if (blockedPattern) {
-      console.log("❌ YOUTUBE PLAYBACK BLOCKED");
-      console.log("BLOCK REASON:", blockedPattern);
-    } else {
-      console.log("✅ YOUTUBE PLAYBACK NOT BLOCKED");
     }
-
-    console.log("PLAYER TEXT:");
-    console.log(pageInfo.bodyText.slice(0, 5000));
-
-    await page.screenshot({
-      path: "youtube-player-test.png",
-      fullPage: true
-    });
-
-    console.log("SCREENSHOT SAVED: youtube-player-test.png");
 
     await browser.close();
 
