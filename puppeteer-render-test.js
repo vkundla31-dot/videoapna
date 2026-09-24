@@ -47,7 +47,7 @@ const PLAYABILITY_CACHE_FILE =
   path.join(
     __dirname,
     "data",
-    "youtube-playability-test-cache.json"
+    "youtube-playability-test-cache-v2.json"
   );
 
 let playabilityCache = {};
