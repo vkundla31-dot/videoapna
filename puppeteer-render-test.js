@@ -6,17 +6,6 @@ const path = require("path");
 let chromePath = "";
 
 function findChromeExecutable() {
-  const configured =
-    process.env.PUPPETEER_EXECUTABLE_PATH || "";
-
-  if (
-    configured &&
-    typeof configured === "string" &&
-    fs.existsSync(configured)
-  ) {
-    return configured;
-  }
-
   const chromeRoot =
     "/opt/render/.cache/puppeteer/chrome";
 
