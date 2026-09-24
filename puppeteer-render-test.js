@@ -254,9 +254,6 @@ async function getBrowser() {
   }
 
   browserStarting = puppeteer.launch({
-    ...(chromePath
-      ? { executablePath: chromePath }
-      : {}),
     headless: true,
     args: [
       "--no-sandbox",
