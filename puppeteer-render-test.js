@@ -178,26 +178,55 @@ async function checkYouTubeEmbedPlayable(browser, videoId) {
       };
     });
 
+    const temporaryPatterns = [
+      "sign in to confirm you’re not a bot",
+      "sign in to confirm you're not a bot",
+      "this helps protect our community"
+    ];
+
+    const isTemporaryBlock =
+      temporaryPatterns.some(function(pattern) {
+        return result.text.includes(pattern);
+      });
+
     const finalResult = result.blocked
       ? {
           playable: false,
           reason: result.reason,
-          text: result.text
+          text: result.text,
+          temporary: isTemporaryBlock
         }
       : {
           playable: true,
           reason: "",
-          text: result.text
+          text: result.text,
+          temporary: false
         };
 
-    playabilityCache[id] = {
+    /*
+     * Bot-wall / temporary YouTube verification को cache में
+     * permanent result की तरह नहीं रखना है।
+     *
+     * अगली server request पर video फिर से check हो सकेगा।
+     */
+    if (!isTemporaryBlock) {
+      playabilityCache[id] = {
+        ...finalResult,
+        checkedAt: new Date().toISOString()
+      };
+
+      savePlayabilityCache();
+    } else {
+      console.warn(
+        "⏭️ TEMPORARY YOUTUBE BOT-WALL - NOT CACHED:",
+        id
+      );
+    }
+
+    return {
       ...finalResult,
       checkedAt: new Date().toISOString()
     };
-
-    savePlayabilityCache();
-
-    return playabilityCache[id];
 
   } catch (error) {
     const result = {
@@ -209,8 +238,14 @@ async function checkYouTubeEmbedPlayable(browser, videoId) {
       checkedAt: new Date().toISOString()
     };
 
-    playabilityCache[id] = result;
-    savePlayabilityCache();
+    /*
+     * Browser/network/Puppeteer error को permanent cache में
+     * मत रखो। यह video की वास्तविक embedding failure साबित नहीं करता।
+     */
+    console.warn(
+      "⏭️ PUPPETEER ERROR - NOT CACHED:",
+      id
+    );
 
     return result;
 
