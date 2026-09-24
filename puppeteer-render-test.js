@@ -3,8 +3,25 @@ const fs = require("fs");
 const http = require("http");
 const path = require("path");
 
-const chromePath =
-  process.env.PUPPETEER_EXECUTABLE_PATH || "";
+let chromePath = "";
+
+try {
+  chromePath =
+    process.env.PUPPETEER_EXECUTABLE_PATH || "";
+
+  if (
+    !chromePath ||
+    !fs.existsSync(chromePath)
+  ) {
+    chromePath =
+      puppeteer.executablePath();
+  }
+} catch (error) {
+  console.warn(
+    "Puppeteer executable path lookup failed:",
+    error.message
+  );
+}
 
 const PLAYABILITY_CACHE_FILE =
   path.join(
