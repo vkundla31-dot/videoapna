@@ -218,6 +218,21 @@ async function getBrowser() {
     return browserStarting;
   }
 
+  try {
+    if (
+      chromePath &&
+      typeof chromePath.then === "function"
+    ) {
+      chromePath = await chromePath;
+    }
+  } catch (error) {
+    console.warn(
+      "Puppeteer executable path await failed:",
+      error.message
+    );
+    chromePath = "";
+  }
+
   browserStarting = puppeteer.launch({
     ...(chromePath
       ? { executablePath: chromePath }
