@@ -5,23 +5,54 @@ const path = require("path");
 
 let chromePath = "";
 
-try {
-  chromePath =
+function findChromeExecutable() {
+  const configured =
     process.env.PUPPETEER_EXECUTABLE_PATH || "";
 
   if (
-    !chromePath ||
-    !fs.existsSync(chromePath)
+    configured &&
+    typeof configured === "string" &&
+    fs.existsSync(configured)
   ) {
-    chromePath =
-      puppeteer.executablePath();
+    return configured;
   }
-} catch (error) {
-  console.warn(
-    "Puppeteer executable path lookup failed:",
-    error.message
-  );
+
+  const chromeRoot =
+    "/opt/render/.cache/puppeteer/chrome";
+
+  try {
+    const versions =
+      fs.readdirSync(chromeRoot, {
+        withFileTypes: true
+      })
+      .filter(entry => entry.isDirectory())
+      .sort()
+      .reverse();
+
+    for (const version of versions) {
+      const candidate =
+        path.join(
+          chromeRoot,
+          version.name,
+          "chrome-linux64",
+          "chrome"
+        );
+
+      if (fs.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+  } catch (error) {
+    console.warn(
+      "Render Chrome cache lookup failed:",
+      error.message
+    );
+  }
+
+  return "";
 }
+
+chromePath = findChromeExecutable();
 
 const PLAYABILITY_CACHE_FILE =
   path.join(
