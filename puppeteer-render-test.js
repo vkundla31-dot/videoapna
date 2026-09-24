@@ -293,6 +293,9 @@ async function getBrowser() {
 
   browserStarting = puppeteer.launch({
     headless: true,
+    timeout: 15000,
+    protocolTimeout: 30000,
+    ...(chromePath ? { executablePath: chromePath } : {}),
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
