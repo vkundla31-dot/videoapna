@@ -6,11 +6,6 @@ const path = require("path");
 const chromePath =
   process.env.PUPPETEER_EXECUTABLE_PATH || "";
 
-const VIDEO_IDS = [
-  "kqQaME_vOsg",
-  "kqQaME_vOsg"
-];
-
 const PLAYABILITY_CACHE_FILE =
   path.join(
     __dirname,
@@ -66,7 +61,6 @@ function savePlayabilityCache() {
   }
 }
 
-
 async function checkYouTubeEmbedPlayable(browser, videoId) {
   const id = String(videoId || "").trim();
 
@@ -77,12 +71,26 @@ async function checkYouTubeEmbedPlayable(browser, videoId) {
     };
   }
 
+  const cached = playabilityCache[id];
+
+  if (cached) {
+    console.log("♻️ CACHE HIT:", id);
+
+    return cached;
+  }
+
+  console.log("🌐 CACHE MISS:", id);
+
   const page = await browser.newPage();
 
   try {
     await page.setViewport({
       width: 1280,
       height: 720
+    });
+
+    await page.setExtraHTTPHeaders({
+      "Referer": "https://videoapna-puppeteer-test.onrender.com/"
     });
 
     const embedUrl =
@@ -130,26 +138,41 @@ async function checkYouTubeEmbedPlayable(browser, videoId) {
       };
     });
 
-    if (result.blocked) {
-      return {
-        playable: false,
-        reason: result.reason,
-        text: result.text
-      };
-    }
+    const finalResult = result.blocked
+      ? {
+          playable: false,
+          reason: result.reason,
+          text: result.text
+        }
+      : {
+          playable: true,
+          reason: "",
+          text: result.text
+        };
 
-    return {
-      playable: true,
-      reason: "",
-      text: result.text
+    playabilityCache[id] = {
+      ...finalResult,
+      checkedAt: new Date().toISOString()
     };
+
+    savePlayabilityCache();
+
+    return playabilityCache[id];
 
   } catch (error) {
-    return {
+    const result = {
       playable: false,
       reason: "puppeteer_error",
-      error: String(error && error.message || error)
+      error: String(
+        error && error.message || error
+      ),
+      checkedAt: new Date().toISOString()
     };
+
+    playabilityCache[id] = result;
+    savePlayabilityCache();
+
+    return result;
 
   } finally {
     try {
@@ -158,96 +181,251 @@ async function checkYouTubeEmbedPlayable(browser, videoId) {
   }
 }
 
-(async () => {
-  console.log("VIDEOAPNA YOUTUBE PLAYER TEST");
-  console.log("Puppeteer:", puppeteer.version);
-  console.log("Chrome path:", chromePath);
-  console.log(
-    "Chrome exists:",
-    chromePath ? fs.existsSync(chromePath) : false
-  );
-  const VIDEO_ID = VIDEO_IDS[0];
-  console.log("Testing YouTube video:", VIDEO_ID);
+let browser = null;
+let browserStarting = null;
 
-  let browser;
+async function getBrowser() {
+  if (browser) {
+    try {
+      const pages = await browser.pages();
+
+      if (Array.isArray(pages)) {
+        return browser;
+      }
+    } catch (error) {
+      browser = null;
+    }
+  }
+
+  if (browserStarting) {
+    return browserStarting;
+  }
+
+  browserStarting = puppeteer.launch({
+    ...(chromePath
+      ? { executablePath: chromePath }
+      : {}),
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage"
+    ]
+  });
 
   try {
-    browser = await puppeteer.launch({
-      ...(chromePath ? { executablePath: chromePath } : {}),
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage"
-      ]
+    browser = await browserStarting;
+    return browser;
+  } finally {
+    browserStarting = null;
+  }
+}
+
+function sendJson(res, statusCode, data) {
+  const body = JSON.stringify(data);
+
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Length": Buffer.byteLength(body)
+  });
+
+  res.end(body);
+}
+
+async function handleCheck(req, res, url) {
+  const videoId =
+    String(
+      url.searchParams.get("videoId") || ""
+    ).trim();
+
+  if (!videoId) {
+    return sendJson(res, 400, {
+      success: false,
+      playable: false,
+      reason: "missing_video_id"
     });
+  }
 
-    console.log("RUNNING REUSABLE YOUTUBE CHECKER...");
+  if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) {
+    return sendJson(res, 400, {
+      success: false,
+      playable: false,
+      reason: "invalid_video_id"
+    });
+  }
 
-    for (const videoId of VIDEO_IDS) {
-      console.log("");
-      console.log("========================================");
-      console.log("CHECKING VIDEO:", videoId);
-      console.log("========================================");
+  try {
+    console.log("");
+    console.log("========================================");
+    console.log("API CHECKING VIDEO:", videoId);
+    console.log("========================================");
 
-      const cachedResult =
-        playabilityCache[String(videoId)];
+    const activeBrowser =
+      await getBrowser();
 
-      if (cachedResult) {
-        console.log("♻️ CACHE HIT:", videoId);
-        console.log(
-          "CHECK RESULT:",
-          JSON.stringify(cachedResult)
-        );
-        continue;
-      }
-
-      console.log("🌐 CACHE MISS:", videoId);
-
-      const result =
-        await checkYouTubeEmbedPlayable(
-          browser,
-          videoId
-        );
-
-      playabilityCache[String(videoId)] = {
-        ...result,
-        checkedAt: new Date().toISOString()
-      };
-
-      savePlayabilityCache();
-
-      console.log(
-        "CHECK RESULT:",
-        JSON.stringify(result)
+    const result =
+      await checkYouTubeEmbedPlayable(
+        activeBrowser,
+        videoId
       );
-    }
 
-    await browser.close();
+    console.log(
+      "API CHECK RESULT:",
+      JSON.stringify(result)
+    );
 
-    console.log("YOUTUBE PLAYER TEST FINISHED");
-
-    const port = Number(process.env.PORT || 10000);
-
-    http.createServer(function(req, res) {
-      res.writeHead(200, {
-        "Content-Type": "text/plain; charset=utf-8"
-      });
-      res.end("VideoApna YouTube player test is running.\n");
-    }).listen(port, "0.0.0.0", function() {
-      console.log("TEST SERVER LISTENING:", port);
+    return sendJson(res, 200, {
+      success: true,
+      videoId,
+      playable: Boolean(result.playable),
+      reason: result.reason || "",
+      checkedAt: result.checkedAt || "",
+      text: result.text || ""
     });
 
   } catch (error) {
-    console.error("YOUTUBE PLAYER TEST FAILED");
-    console.error(error);
+    console.error(
+      "API CHECK FAILED:",
+      error
+    );
 
-    if (browser) {
-      try {
-        await browser.close();
-      } catch (e) {}
-    }
-
-    process.exitCode = 1;
+    return sendJson(res, 500, {
+      success: false,
+      videoId,
+      playable: false,
+      reason: "checker_error",
+      error: String(
+        error && error.message || error
+      )
+    });
   }
-})();
+}
+
+const port =
+  Number(process.env.PORT || 10000);
+
+const server =
+  http.createServer(
+    async function(req, res) {
+      try {
+        const url =
+          new URL(
+            req.url || "/",
+            "http://" +
+              (req.headers.host ||
+               "localhost")
+          );
+
+        if (url.pathname === "/") {
+          return sendJson(res, 200, {
+            success: true,
+            service:
+              "VideoApna YouTube Playability Checker",
+            status: "running"
+          });
+        }
+
+        if (url.pathname === "/health") {
+          return sendJson(res, 200, {
+            success: true,
+            status: "healthy"
+          });
+        }
+
+        if (url.pathname === "/check") {
+          return await handleCheck(
+            req,
+            res,
+            url
+          );
+        }
+
+        return sendJson(res, 404, {
+          success: false,
+          message: "Not found"
+        });
+
+      } catch (error) {
+        console.error(
+          "HTTP SERVER ERROR:",
+          error
+        );
+
+        return sendJson(res, 500, {
+          success: false,
+          message: "Internal server error"
+        });
+      }
+    }
+  );
+
+server.listen(
+  port,
+  "0.0.0.0",
+  async function() {
+    console.log(
+      "VIDEOAPNA YOUTUBE PLAYABILITY CHECKER"
+    );
+
+    console.log(
+      "Chrome path:",
+      chromePath || "(Puppeteer default)"
+    );
+
+    console.log(
+      "Chrome exists:",
+      chromePath
+        ? fs.existsSync(chromePath)
+        : "default"
+    );
+
+    console.log(
+      "CHECKER SERVER LISTENING:",
+      port
+    );
+
+    try {
+      await getBrowser();
+
+      console.log(
+        "✅ PUPPETEER BROWSER READY"
+      );
+    } catch (error) {
+      console.error(
+        "❌ PUPPETEER BROWSER START FAILED:",
+        error
+      );
+    }
+  }
+);
+
+process.on(
+  "SIGTERM",
+  async function() {
+    try {
+      if (browser) {
+        await browser.close();
+      }
+    } catch (e) {}
+
+    server.close(function() {
+      process.exit(0);
+    });
+  }
+);
+
+process.on(
+  "SIGINT",
+  async function() {
+    try {
+      if (browser) {
+        await browser.close();
+      }
+    } catch (e) {}
+
+    server.close(function() {
+      process.exit(0);
+    });
+  }
+);
