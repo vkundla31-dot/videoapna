@@ -1089,13 +1089,6 @@ async function loadOneLongYouTubePage() {
         continue;
       }
 
-      console.log(
-        "🎯 YOUTUBE LONG ACCEPT:",
-        videoId,
-        "| title=",
-        video.title || ""
-      );
-
       const candidate = {
         ...video,
         source: "youtube",
@@ -1118,6 +1111,13 @@ async function loadOneLongYouTubePage() {
       ) {
         continue;
       }
+
+      console.log(
+        "🎯 YOUTUBE LONG ACCEPT:",
+        videoId,
+        "| title=",
+        video.title || ""
+      );
 
       youtubeLongVideos.push(
         candidate
@@ -4326,19 +4326,74 @@ async function preflightYouTubeLong(video) {
                   }
 
                   /*
-                   * कुछ valid videos में autoplay/browser policy
-                   * के कारण PLAYING event नहीं आएगा।
+                   * केवल onReady को embedding success नहीं मानेंगे।
                    *
-                   * इसलिए actual blocking error न मिलने पर
-                   * थोड़ी देर बाद इसे allowed मानेंगे।
+                   * कुछ YouTube videos में player तैयार हो जाता है,
+                   * लेकिन actual embedded playback उपलब्ध नहीं होता।
+                   *
+                   * इसलिए थोड़ी देर बाद वास्तविक player state जाँचेंगे।
+                   *
+                   * 1 = PLAYING
+                   * 2 = PAUSED
+                   * 3 = BUFFERING
+                   *
+                   * PLAYING/BUFFERING मिलने पर embedded playback
+                   * स्वीकार करेंगे।
+                   *
+                   * -1 = UNSTARTED और दूसरे non-playing states को
+                   * इस preflight batch में reject करेंगे, क्योंकि
+                   * feed में unavailable video जाने से बेहतर है
+                   * उसे पहले ही छोड़ देना।
                    */
                   setTimeout(function() {
 
-                    if (!settled) {
-                      markAllowed();
+                    if (settled) {
+                      return;
                     }
 
-                  }, 1800);
+                    try {
+
+                      const state =
+                        player &&
+                        typeof player.getPlayerState === "function"
+                          ? Number(player.getPlayerState())
+                          : -999;
+
+                      console.log(
+                        "🎬 YouTube Long preflight state:",
+                        videoId,
+                        state
+                      );
+
+                      if (
+                        state === 1 ||
+                        state === 3
+                      ) {
+                        markAllowed();
+                        return;
+                      }
+
+                      markFailed(
+                        "no-embedded-playback"
+                      );
+
+                    } catch (error) {
+
+                      console.warn(
+                        "⚠️ YouTube Long preflight state check failed:",
+                        videoId,
+                        error &&
+                        error.message
+                          ? error.message
+                          : error
+                      );
+
+                      markFailed(
+                        "state-check-failed"
+                      );
+                    }
+
+                  }, 4000);
                 },
 
                 onError: function(event) {
@@ -4443,8 +4498,270 @@ function monitorYouTubeLong(
     return;
   }
 
-  ensureVideoApnaYouTubeAPI()
+  console.log(
+    "🚦 YouTube Long monitor ENTER:",
+    videoId,
+    video.title || ""
+  );
+
+  try {
+    fetch("/api/youtube-long-player-state-debug", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        videoId: videoId,
+        state: "MONITOR_ENTER",
+        title: video.title || "",
+        time: Date.now()
+      })
+    }).catch(function () {});
+  } catch (debugError) {}
+
+  let longPlayerStarted = false;
+  let longPlayerFinished = false;
+
+  function removeOnce(code) {
+    if (longPlayerFinished) {
+      return;
+    }
+
+    longPlayerFinished = true;
+
+    removeFailedYouTubeLong(
+      video,
+      code
+    );
+  }
+
+  try {
+    fetch("/api/youtube-long-player-state-debug", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        videoId: videoId,
+        state: "BEFORE_API_CHECK",
+        title: video.title || "",
+        ytExists: Boolean(window.YT),
+        ytPlayerExists: Boolean(
+          window.YT &&
+          window.YT.Player
+        ),
+        ytReadyCallbackExists:
+          typeof window.onYouTubeIframeAPIReady === "function",
+        iframeApiScripts:
+          Array.from(
+            document.scripts || []
+          ).filter(function (script) {
+            return String(
+              script.src || ""
+            ).includes("youtube.com/iframe_api");
+          }).length,
+        time: Date.now()
+      })
+    }).catch(function () {});
+  } catch (debugError) {}
+
+  /*
+   * LONG-ONLY YOUTUBE IFRAME API LOADER
+   *
+   * Shorts के shared loader को बिल्कुल use नहीं करेंगे।
+   * इससे Long player का API lifecycle अलग रहेगा।
+   */
+  let longYouTubeApiPromise = null;
+
+  function ensureVideoApnaYouTubeLongAPI() {
+
+    if (
+      window.YT &&
+      window.YT.Player
+    ) {
+      return Promise.resolve(window.YT);
+    }
+
+    if (longYouTubeApiPromise) {
+      return longYouTubeApiPromise;
+    }
+
+    longYouTubeApiPromise =
+      new Promise(function (resolve, reject) {
+
+        let settled = false;
+        let timer = null;
+
+        function finishIfReady() {
+          if (
+            !settled &&
+            window.YT &&
+            window.YT.Player
+          ) {
+            settled = true;
+
+            if (timer) {
+              clearInterval(timer);
+              timer = null;
+            }
+
+            resolve(window.YT);
+          }
+        }
+
+        const existingScripts =
+          Array.from(
+            document.scripts || []
+          ).filter(function (script) {
+            return String(
+              script.src || ""
+            ).includes(
+              "youtube.com/iframe_api"
+            );
+          });
+
+        /*
+         * अगर API script पहले से मौजूद है,
+         * तो नया duplicate script नहीं डालेंगे।
+         */
+        if (existingScripts.length > 0) {
+
+          timer = setInterval(
+            finishIfReady,
+            100
+          );
+
+          setTimeout(function () {
+            if (!settled) {
+              finishIfReady();
+
+              if (!settled) {
+                settled = true;
+
+                if (timer) {
+                  clearInterval(timer);
+                  timer = null;
+                }
+
+                reject(
+                  new Error(
+                    "YouTube IFrame API timeout"
+                  )
+                );
+              }
+            }
+          }, 15000);
+
+          return;
+        }
+
+        const oldReady =
+          window.onYouTubeIframeAPIReady;
+
+        window.onYouTubeIframeAPIReady =
+          function () {
+
+            if (
+              typeof oldReady ===
+              "function"
+            ) {
+              try {
+                oldReady();
+              } catch (e) {}
+            }
+
+            finishIfReady();
+          };
+
+        const script =
+          document.createElement("script");
+
+        script.src =
+          "https://www.youtube.com/iframe_api";
+
+        script.async = true;
+
+        script.onload = function () {
+          console.log(
+            "📥 Long YouTube IFrame API script loaded"
+          );
+          finishIfReady();
+        };
+
+        script.onerror = function () {
+          if (!settled) {
+            settled = true;
+
+            if (timer) {
+              clearInterval(timer);
+              timer = null;
+            }
+
+            reject(
+              new Error(
+                "YouTube IFrame API script load failed"
+              )
+            );
+          }
+        };
+
+        document.head.appendChild(script);
+
+        timer = setInterval(
+          finishIfReady,
+          100
+        );
+
+        setTimeout(function () {
+          if (!settled) {
+            finishIfReady();
+
+            if (!settled) {
+              settled = true;
+
+              if (timer) {
+                clearInterval(timer);
+                timer = null;
+              }
+
+              reject(
+                new Error(
+                  "YouTube IFrame API timeout"
+                )
+              );
+            }
+          }
+        }, 15000);
+      });
+
+    return longYouTubeApiPromise;
+  }
+
+  ensureVideoApnaYouTubeLongAPI()
     .then(function (YT) {
+
+      console.log(
+        "🧩 YouTube Long API RESOLVED:",
+        videoId,
+        video.title || "",
+        "YT=" + Boolean(YT),
+        "Player=" + Boolean(YT && YT.Player)
+      );
+
+      try {
+        fetch("/api/youtube-long-player-state-debug", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            videoId: videoId,
+            state: "API_RESOLVED",
+            title: video.title || "",
+            time: Date.now()
+          })
+        }).catch(function () {});
+      } catch (debugError) {}
 
       if (
         !YT ||
@@ -4452,10 +4769,39 @@ function monitorYouTubeLong(
         !iframe ||
         !iframe.isConnected
       ) {
+        console.warn(
+          "⚠️ YouTube Long API/player unavailable:",
+          videoId,
+          Boolean(YT),
+          Boolean(YT && YT.Player),
+          Boolean(iframe),
+          Boolean(iframe && iframe.isConnected)
+        );
         return;
       }
 
       try {
+
+        console.log(
+          "🛠️ Creating YouTube Long YT.Player:",
+          videoId,
+          video.title || ""
+        );
+
+        try {
+          fetch("/api/youtube-long-player-state-debug", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              videoId: videoId,
+              state: "PLAYER_CREATE",
+              title: video.title || "",
+              time: Date.now()
+            })
+          }).catch(function () {});
+        } catch (debugError) {}
 
         new YT.Player(
           iframe,
@@ -4468,6 +4814,70 @@ function monitorYouTubeLong(
               origin: window.location.origin
             },
             events: {
+
+              onReady: function () {
+                console.log(
+                  "🎬 YouTube Long Player Ready:",
+                  videoId,
+                  video.title || ""
+                );
+
+                try {
+                  fetch("/api/youtube-long-player-state-debug", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                      videoId: videoId,
+                      state: "READY",
+                      title: video.title || "",
+                      time: Date.now()
+                    })
+                  }).catch(function () {});
+                } catch (debugError) {}
+              },
+
+              onStateChange: function (event) {
+                const state =
+                  Number(
+                    event &&
+                    event.data
+                  );
+
+                console.log(
+                  "🎬 YouTube Long Player State:",
+                  state,
+                  videoId,
+                  video.title || ""
+                );
+
+                try {
+                  fetch("/api/youtube-long-player-state-debug", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                      videoId: videoId,
+                      state: state,
+                      title: video.title || "",
+                      time: Date.now()
+                    })
+                  }).catch(function () {});
+                } catch (debugError) {}
+
+                /*
+                 * YouTube IFrame API:
+                 * 1 = PLAYING
+                 * 2 = PAUSED
+                 * 3 = BUFFERING
+                 * 0 = ENDED
+                 */
+                if (state === 1) {
+                  longPlayerStarted = true;
+                }
+              },
 
               onError: function (event) {
 
@@ -4503,16 +4913,37 @@ function monitorYouTubeLong(
                   video.title || ""
                 );
 
+                /*
+                 * LONG PLAYER DIAGNOSTIC
+                 *
+                 * Browser से actual YouTube IFrame error
+                 * server तक भेजेंगे ताकि Android पर console
+                 * के बिना भी Termux log में पता चले।
+                 *
+                 * Shorts को यह code बिल्कुल नहीं छूता।
+                 */
+                try {
+                  fetch("/api/youtube-long-player-debug", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                      videoId: videoId,
+                      errorCode: code,
+                      title: video.title || "",
+                      time: Date.now()
+                    })
+                  }).catch(function () {});
+                } catch (debugError) {}
+
                 if (
                   blockedCodes.includes(
                     code
                   )
                 ) {
 
-                  removeFailedYouTubeLong(
-                    video,
-                    code
-                  );
+                  removeOnce(code);
 
                 }
 
@@ -4534,16 +4965,60 @@ function monitorYouTubeLong(
 
       }
 
+      /*
+       * कुछ YouTube embed failures में onError event नहीं आता,
+       * लेकिन player unavailable screen पर अटका रहता है।
+       *
+       * यह watchdog केवल Long YouTube player के लिए है।
+       */
+      setTimeout(function () {
+
+        if (
+          !longPlayerFinished &&
+          !longPlayerStarted &&
+          iframe &&
+          iframe.isConnected
+        ) {
+          console.warn(
+            "⛔ YouTube Long player did not start:",
+            videoId,
+            video.title || ""
+          );
+
+          removeOnce(153);
+        }
+
+      }, 12000);
+
     })
     .catch(function (error) {
 
-      console.warn(
-        "⚠️ YouTube IFrame API load failed:",
+      const apiErrorMessage =
         error &&
         error.message
           ? error.message
-          : error
+          : String(error);
+
+      console.warn(
+        "⚠️ YouTube IFrame API load failed:",
+        apiErrorMessage
       );
+
+      try {
+        fetch("/api/youtube-long-player-state-debug", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            videoId: videoId,
+            state: "API_ERROR",
+            title: video.title || "",
+            error: apiErrorMessage,
+            time: Date.now()
+          })
+        }).catch(function () {});
+      } catch (debugError) {}
 
     });
 }
@@ -10579,6 +11054,19 @@ window.videoApnaSelectedSound = null;
     videoApnaYouTubeApiPromise =
       new Promise(function (resolve, reject) {
 
+        let settled = false;
+
+        function finishIfReady() {
+          if (
+            !settled &&
+            window.YT &&
+            window.YT.Player
+          ) {
+            settled = true;
+            resolve(window.YT);
+          }
+        }
+
         const oldReady =
           window.onYouTubeIframeAPIReady;
 
@@ -10591,14 +11079,30 @@ window.videoApnaSelectedSound = null;
               } catch (e) {}
             }
 
-            if (window.YT && window.YT.Player) {
-              resolve(window.YT);
-            } else {
-              reject(
-                new Error("YouTube IFrame API unavailable")
-              );
-            }
+            finishIfReady();
           };
+
+        /*
+         * जरूरी सुरक्षा:
+         *
+         * अगर YouTube API script पहले से मौजूद है और
+         * callback पहले ही fire हो चुका है, तो ऊपर वाला
+         * callback दोबारा नहीं आएगा।
+         *
+         * इसलिए थोड़ी देर तक सीधे window.YT भी check करें।
+         */
+        const readyTimer = setInterval(
+          function () {
+            if (
+              window.YT &&
+              window.YT.Player
+            ) {
+              clearInterval(readyTimer);
+              finishIfReady();
+            }
+          },
+          100
+        );
 
         const script =
           document.createElement("script");
@@ -10609,12 +11113,49 @@ window.videoApnaSelectedSound = null;
         script.async = true;
 
         script.onerror = function () {
-          reject(
-            new Error("YouTube IFrame API load failed")
-          );
+          clearInterval(readyTimer);
+
+          if (!settled) {
+            settled = true;
+
+            reject(
+              new Error(
+                "YouTube IFrame API load failed"
+              )
+            );
+          }
         };
 
         document.head.appendChild(script);
+
+        /*
+         * अंतिम timeout:
+         * API वास्तव में उपलब्ध न हो तो Promise हमेशा
+         * pending न रहे।
+         */
+        setTimeout(
+          function () {
+            clearInterval(readyTimer);
+
+            if (!settled) {
+              if (
+                window.YT &&
+                window.YT.Player
+              ) {
+                finishIfReady();
+              } else {
+                settled = true;
+
+                reject(
+                  new Error(
+                    "YouTube IFrame API timeout"
+                  )
+                );
+              }
+            }
+          },
+          15000
+        );
       });
 
     return videoApnaYouTubeApiPromise;

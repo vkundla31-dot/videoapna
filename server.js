@@ -5878,7 +5878,7 @@ function getYouTubeLongCacheKey(
   pageToken
 ) {
   return JSON.stringify({
-    version: "puppeteer-preflight-v2",
+    version: "manual-filter-v1",
 
     q:
       String(query || "")
@@ -6682,230 +6682,17 @@ app.get("/api/youtube-long-search", (req, res) => {
                   });
 
                 /*
-                 * REAL PLAYER VERIFICATION
+                 * MANUAL LONG VIDEO FILTER
                  *
-                 * YouTube API का embeddable=true अकेला पर्याप्त नहीं है।
-                 * अब candidate videos को existing VideoApna Puppeteer
-                 * checker से वास्तविक embed/player availability के लिए
-                 * verify किया जाएगा।
+                 * YouTube API के official metadata filters
+                 * पास करने वाले Long videos सीधे feed में जाएँगे।
                  *
-                 * एक साथ केवल 5 checks चलेंगे ताकि 50-video page पर
-                 * server पर अनावश्यक load न पड़े।
+                 * Puppeteer / external checker यहाँ इस्तेमाल नहीं होगा।
+                 * Actual embedded-player errors को client-side Long
+                 * player बाद में Shorts की तरह handle करेगा।
                  */
 
-                const puppeteerVerifiedItems = [];
-
-/*
- * Long YouTube videos:
- * - पहले successful real-embed verification cache देखें।
- * - Cache hit पर Puppeteer दोबारा नहीं चलेगा।
- * - Cache miss पर अधिकतम 5 checks एक साथ चलेंगे।
- * - केवल playable=true को per-video cache में रखा जाएगा।
- */
-
-for (
-  let batchStart = 0;
-  batchStart < candidateItems.length;
-) {
-  const uncachedBatch = [];
-
-  /*
-   * पहले cache hits निकालें और सीधे verified list में डालें।
-   * फिर अधिकतम 5 cache-miss candidates Puppeteer को दें।
-   */
-  while (
-    batchStart < candidateItems.length &&
-    uncachedBatch.length < 5
-  ) {
-    const item =
-      candidateItems[batchStart++];
-
-    const videoId =
-      item.id.videoId;
-
-    const cachedCheck =
-      getYouTubeLongPlayabilityCached(
-        videoId
-      );
-
-    if (cachedCheck) {
-      console.log(
-        "♻️ YOUTUBE LONG PLAYABILITY CACHE HIT:",
-        videoId,
-        "| checkedAt=",
-        cachedCheck.checkedAt
-      );
-
-      puppeteerVerifiedItems.push(item);
-      continue;
-    }
-
-    uncachedBatch.push(item);
-  }
-
-  /*
-   * अगर इस हिस्से में सारे candidates cache-hit थे,
-   * तो अगला हिस्सा तुरंत process करें।
-   */
-  if (uncachedBatch.length === 0) {
-    continue;
-  }
-
-  const batchResults =
-    await Promise.all(
-      uncachedBatch.map(async item => {
-        const videoId =
-          item.id.videoId;
-
-        const check =
-          await checkYouTubeLongWithPuppeteer(
-            videoId
-          );
-
-        console.log(
-          "🎭 YOUTUBE PUPPETEER CHECK:",
-          videoId,
-          "| playable=",
-          check.playable,
-          "| reason=",
-          check.reason || ""
-        );
-
-        if (!check.playable) {
-          const reason =
-            String(
-              check.reason || ""
-            ).trim();
-
-          const text =
-            String(
-              check.text || ""
-            )
-              .trim()
-              .toLowerCase();
-
-          const reasonLower =
-            reason.toLowerCase();
-
-          /*
-           * YouTube bot-wall वास्तविक embed failure नहीं है।
-           */
-          const isBotWall =
-            reasonLower.includes(
-              "sign in to confirm"
-            ) ||
-            reasonLower.includes(
-              "not a bot"
-            ) ||
-            text.includes(
-              "sign in to confirm you’re not a bot"
-            ) ||
-            text.includes(
-              "sign in to confirm you're not a bot"
-            ) ||
-            text.includes(
-              "this helps protect our community"
-            );
-
-          /*
-           * Checker infrastructure failure को
-           * permanent failure नहीं मानना है।
-           */
-          const isCheckerInfrastructureError =
-            /^checker HTTP (502|503|504)$/.test(
-              reason
-            ) ||
-            reason ===
-              "checker request failed" ||
-            reason ===
-              "puppeteer_error";
-
-          if (
-            isBotWall ||
-            isCheckerInfrastructureError
-          ) {
-            console.warn(
-              "⏭️ YOUTUBE CHECK INDETERMINATE - NOT AUTO-FAILED:",
-              videoId,
-              "|",
-              reason
-            );
-
-            return null;
-          }
-
-          /*
-           * केवल स्पष्ट real embed/player failures को reject करें।
-           */
-          const permanentPlayerFailure =
-            reasonLower ===
-              "watch video on youtube" ||
-            reasonLower ===
-              "watch on youtube" ||
-            reasonLower ===
-              "youtube पर देखें" ||
-            reasonLower ===
-              "youtube पर जाने के लिए क्लिक करें" ||
-            reasonLower ===
-              "video unavailable" ||
-            reasonLower ===
-              "this video is unavailable" ||
-            reasonLower ===
-              "यह वीडियो उपलब्ध नहीं है" ||
-            reasonLower ===
-              "error 153" ||
-            reasonLower ===
-              "error 163";
-
-          if (permanentPlayerFailure) {
-            console.warn(
-              "🚫 YOUTUBE REAL EMBED FAILURE:",
-              videoId,
-              "|",
-              reason
-            );
-
-            return null;
-          }
-
-          /*
-           * Unknown result भी permanent failure नहीं है।
-           */
-          console.warn(
-            "⏭️ YOUTUBE UNKNOWN CHECK RESULT - NOT AUTO-FAILED:",
-            videoId,
-            "|",
-            reason
-          );
-
-          return null;
-        }
-
-        /*
-         * केवल वास्तविक playable=true को 24-hour
-         * per-video Long playability cache में रखें।
-         */
-        saveYouTubeLongPlayabilityCached(
-          videoId,
-          check
-        );
-
-        return item;
-      })
-    );
-
-  for (
-    const verifiedItem of batchResults
-  ) {
-    if (verifiedItem) {
-      puppeteerVerifiedItems.push(
-        verifiedItem
-      );
-    }
-  }
-}
-
-const videos = puppeteerVerifiedItems.map(item => {
+const videos = candidateItems.map(item => {
                     const videoId =
                       item.id.videoId;
 
@@ -8620,6 +8407,115 @@ app.post(
  * पैदा कर सकता है।
  * ============================================================
  */
+/*
+ * LONG PLAYER DIAGNOSTIC ROUTE
+ *
+ * Browser के YouTube IFrame API से आने वाले actual player
+ * error को केवल log करेंगे।
+ *
+ * यह route किसी video को block/save नहीं करता।
+ * Shorts को यह code बिल्कुल नहीं छूता।
+ */
+app.post("/api/youtube-long-player-debug", (req, res) => {
+  try {
+    const videoId =
+      String(req.body && req.body.videoId || "").trim();
+
+    const errorCode =
+      Number(req.body && req.body.errorCode || 0);
+
+    const title =
+      String(req.body && req.body.title || "").trim();
+
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid YouTube video ID"
+      });
+    }
+
+    console.warn(
+      "🔎 YOUTUBE LONG PLAYER DEBUG:",
+      "code=" + errorCode,
+      "videoId=" + videoId,
+      "title=" + title
+    );
+
+    return res.json({
+      success: true,
+      videoId,
+      errorCode
+    });
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long player diagnostic failed:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Diagnostic log failed"
+    });
+  }
+});
+
+/*
+ * LONG PLAYER STATE DIAGNOSTIC ROUTE
+ *
+ * Browser से Long YouTube player का READY और
+ * onStateChange event केवल log करेंगे।
+ *
+ * यह किसी video को block/save नहीं करता।
+ * Shorts को यह code बिल्कुल नहीं छूता।
+ */
+app.post("/api/youtube-long-player-state-debug", (req, res) => {
+  try {
+    const videoId =
+      String(req.body && req.body.videoId || "").trim();
+
+    const state =
+      req.body && req.body.state;
+
+    const title =
+      String(req.body && req.body.title || "").trim();
+
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid YouTube video ID"
+      });
+    }
+
+    console.warn(
+      "📡 YOUTUBE LONG PLAYER STATE DEBUG:",
+      "state=" + state,
+      "videoId=" + videoId,
+      "title=" + title,
+      "ytExists=" + String(req.body && req.body.ytExists),
+      "ytPlayerExists=" + String(req.body && req.body.ytPlayerExists),
+      "ytReadyCallbackExists=" + String(req.body && req.body.ytReadyCallbackExists),
+      "iframeApiScripts=" + String(req.body && req.body.iframeApiScripts),
+      "error=" + String(req.body && req.body.error || "")
+    );
+
+    return res.json({
+      success: true,
+      videoId,
+      state
+    });
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long player state diagnostic failed:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "State diagnostic log failed"
+    });
+  }
+});
+
 app.post("/api/youtube-long-player-failed", (req, res) => {
   try {
     const videoId =
