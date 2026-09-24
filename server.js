@@ -5878,7 +5878,7 @@ function getYouTubeLongCacheKey(
   pageToken
 ) {
   return JSON.stringify({
-    version: "puppeteer-preflight-v1",
+    version: "puppeteer-preflight-v2",
 
     q:
       String(query || "")
@@ -5892,6 +5892,141 @@ function getYouTubeLongCacheKey(
 }
 
 
+
+// ============================================================
+// YOUTUBE LONG PER-VIDEO PLAYABILITY CACHE
+// एक सफल real-embed verification को अलग-अलग Long searches में
+// दोबारा Puppeteer से check करने की जरूरत नहीं होगी.
+// ============================================================
+const YOUTUBE_LONG_PLAYABILITY_CACHE_FILE =
+  path.join(
+    __dirname,
+    "data",
+    "youtube-long-playability-cache.json"
+  );
+
+const YOUTUBE_LONG_PLAYABILITY_CACHE_TTL_MS =
+  24 * 60 * 60 * 1000;
+
+let youtubeLongPlayabilityCache = {};
+
+try {
+  if (
+    fs.existsSync(
+      YOUTUBE_LONG_PLAYABILITY_CACHE_FILE
+    )
+  ) {
+    const cacheText =
+      fs.readFileSync(
+        YOUTUBE_LONG_PLAYABILITY_CACHE_FILE,
+        "utf8"
+      );
+
+    const parsedCache =
+      JSON.parse(cacheText);
+
+    if (
+      parsedCache &&
+      typeof parsedCache === "object" &&
+      !Array.isArray(parsedCache)
+    ) {
+      youtubeLongPlayabilityCache =
+        parsedCache;
+    }
+  }
+} catch (error) {
+  console.warn(
+    "⚠️ YouTube Long playability cache load failed:",
+    error.message
+  );
+
+  youtubeLongPlayabilityCache = {};
+}
+
+function getYouTubeLongPlayabilityCached(
+  videoId
+) {
+  const id =
+    String(videoId || "").trim();
+
+  if (!id) {
+    return null;
+  }
+
+  const entry =
+    youtubeLongPlayabilityCache[id];
+
+  if (
+    !entry ||
+    entry.playable !== true ||
+    !entry.checkedAt
+  ) {
+    return null;
+  }
+
+  const age =
+    Date.now() -
+    Date.parse(entry.checkedAt);
+
+  if (
+    !Number.isFinite(age) ||
+    age < 0 ||
+    age > YOUTUBE_LONG_PLAYABILITY_CACHE_TTL_MS
+  ) {
+    delete youtubeLongPlayabilityCache[id];
+    return null;
+  }
+
+  return entry;
+}
+
+function saveYouTubeLongPlayabilityCached(
+  videoId,
+  check
+) {
+  const id =
+    String(videoId || "").trim();
+
+  if (
+    !id ||
+    !check ||
+    check.playable !== true
+  ) {
+    return;
+  }
+
+  youtubeLongPlayabilityCache[id] = {
+    playable: true,
+    reason:
+      String(check.reason || ""),
+    checkedAt:
+      new Date().toISOString()
+  };
+
+  try {
+    fs.mkdirSync(
+      path.dirname(
+        YOUTUBE_LONG_PLAYABILITY_CACHE_FILE
+      ),
+      { recursive: true }
+    );
+
+    fs.writeFileSync(
+      YOUTUBE_LONG_PLAYABILITY_CACHE_FILE,
+      JSON.stringify(
+        youtubeLongPlayabilityCache,
+        null,
+        2
+      ),
+      "utf8"
+    );
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long playability cache save failed:",
+      error.message
+    );
+  }
+}
 
 const VIDEOAPNA_PUPPETEER_CHECKER_URL =
   String(
@@ -6044,6 +6179,22 @@ function isValidCachedYouTubeLongVideo(video) {
   }
 
   return true;
+}
+
+// ============================================================
+// YOUTUBE LONG IN-FLIGHT REQUEST LOCK
+// Same query + pageToken पर concurrent requests को एक ही
+// Puppeteer/API job का result reuse कराया जाएगा.
+// ============================================================
+
+const youtubeLongInFlight = new Map();
+
+function getYouTubeLongInFlightKey(query, pageToken) {
+  return (
+    String(query || "").trim().toLowerCase() +
+    "|" +
+    String(pageToken || "").trim()
+  );
 }
 
 function getYouTubeLongCachedResult(
@@ -6208,6 +6359,128 @@ app.get("/api/youtube-long-search", (req, res) => {
           cachedYouTubeLong.videos
       });
     }
+
+    // ==========================================================
+    // IN-FLIGHT LOCK
+    // Same query + pageToken की दूसरी concurrent request
+    // Puppeteer/API job दोबारा शुरू नहीं करेगी।
+    // ==========================================================
+
+    const inFlightKey =
+      getYouTubeLongInFlightKey(
+        query,
+        pageToken
+      );
+
+    const existingInFlight =
+      youtubeLongInFlight.get(
+        inFlightKey
+      );
+
+    if (existingInFlight) {
+
+      console.log(
+        "⏳ YOUTUBE LONG IN-FLIGHT WAIT:",
+        query,
+        "| page:",
+        pageToken
+          ? "NEXT"
+          : "FIRST"
+      );
+
+      existingInFlight.then(() => {
+
+        const completedCache =
+          getYouTubeLongCachedResult(
+            query,
+            pageToken
+          );
+
+        if (completedCache) {
+
+          console.log(
+            "✅ YOUTUBE LONG IN-FLIGHT CACHE READY:",
+            query,
+            "| page:",
+            pageToken
+              ? "NEXT"
+              : "FIRST",
+            "| videos:",
+            completedCache.videos.length
+          );
+
+          return res.json({
+            success: true,
+            nextPageToken:
+              completedCache.nextPageToken,
+            videos:
+              completedCache.videos
+          });
+        }
+
+        return res.status(502).json({
+          success: false,
+          message:
+            "YouTube Long request पूरा हुआ लेकिन cache result उपलब्ध नहीं है।"
+        });
+
+      }).catch(error => {
+
+        console.error(
+          "❌ YOUTUBE LONG IN-FLIGHT WAIT ERROR:",
+          error.message
+        );
+
+        if (!res.headersSent) {
+          res.status(502).json({
+            success: false,
+            message:
+              "YouTube Long request में समस्या हुई।"
+          });
+        }
+
+      });
+
+      return;
+    }
+
+    let resolveInFlight;
+
+    const inFlightPromise =
+      new Promise(resolve => {
+        resolveInFlight = resolve;
+      });
+
+    youtubeLongInFlight.set(
+      inFlightKey,
+      inFlightPromise
+    );
+
+    res.once("finish", () => {
+
+      resolveInFlight();
+
+      youtubeLongInFlight.delete(
+        inFlightKey
+      );
+
+    });
+
+    res.once("close", () => {
+
+      if (
+        youtubeLongInFlight.get(
+          inFlightKey
+        ) === inFlightPromise
+      ) {
+        resolveInFlight();
+
+        youtubeLongInFlight.delete(
+          inFlightKey
+        );
+      }
+
+    });
 
     console.log(
       "🌐 YOUTUBE LONG CACHE MISS:",
@@ -6409,15 +6682,230 @@ app.get("/api/youtube-long-search", (req, res) => {
                   });
 
                 /*
-                 * Scalable production mode:
-                 * YouTube API के embeddable + syndicated filters
-                 * और duration > 90 seconds filter के बाद
-                 * candidateItems सीधे Long Video feed में जाएंगे।
+                 * REAL PLAYER VERIFICATION
                  *
-                 * Puppeteer per-video verification production में disabled है।
+                 * YouTube API का embeddable=true अकेला पर्याप्त नहीं है।
+                 * अब candidate videos को existing VideoApna Puppeteer
+                 * checker से वास्तविक embed/player availability के लिए
+                 * verify किया जाएगा।
+                 *
+                 * एक साथ केवल 5 checks चलेंगे ताकि 50-video page पर
+                 * server पर अनावश्यक load न पड़े।
                  */
-                const videos =
-                  candidateItems.map(item => {
+
+                const puppeteerVerifiedItems = [];
+
+/*
+ * Long YouTube videos:
+ * - पहले successful real-embed verification cache देखें।
+ * - Cache hit पर Puppeteer दोबारा नहीं चलेगा।
+ * - Cache miss पर अधिकतम 5 checks एक साथ चलेंगे।
+ * - केवल playable=true को per-video cache में रखा जाएगा।
+ */
+
+for (
+  let batchStart = 0;
+  batchStart < candidateItems.length;
+) {
+  const uncachedBatch = [];
+
+  /*
+   * पहले cache hits निकालें और सीधे verified list में डालें।
+   * फिर अधिकतम 5 cache-miss candidates Puppeteer को दें।
+   */
+  while (
+    batchStart < candidateItems.length &&
+    uncachedBatch.length < 5
+  ) {
+    const item =
+      candidateItems[batchStart++];
+
+    const videoId =
+      item.id.videoId;
+
+    const cachedCheck =
+      getYouTubeLongPlayabilityCached(
+        videoId
+      );
+
+    if (cachedCheck) {
+      console.log(
+        "♻️ YOUTUBE LONG PLAYABILITY CACHE HIT:",
+        videoId,
+        "| checkedAt=",
+        cachedCheck.checkedAt
+      );
+
+      puppeteerVerifiedItems.push(item);
+      continue;
+    }
+
+    uncachedBatch.push(item);
+  }
+
+  /*
+   * अगर इस हिस्से में सारे candidates cache-hit थे,
+   * तो अगला हिस्सा तुरंत process करें।
+   */
+  if (uncachedBatch.length === 0) {
+    continue;
+  }
+
+  const batchResults =
+    await Promise.all(
+      uncachedBatch.map(async item => {
+        const videoId =
+          item.id.videoId;
+
+        const check =
+          await checkYouTubeLongWithPuppeteer(
+            videoId
+          );
+
+        console.log(
+          "🎭 YOUTUBE PUPPETEER CHECK:",
+          videoId,
+          "| playable=",
+          check.playable,
+          "| reason=",
+          check.reason || ""
+        );
+
+        if (!check.playable) {
+          const reason =
+            String(
+              check.reason || ""
+            ).trim();
+
+          const text =
+            String(
+              check.text || ""
+            )
+              .trim()
+              .toLowerCase();
+
+          const reasonLower =
+            reason.toLowerCase();
+
+          /*
+           * YouTube bot-wall वास्तविक embed failure नहीं है।
+           */
+          const isBotWall =
+            reasonLower.includes(
+              "sign in to confirm"
+            ) ||
+            reasonLower.includes(
+              "not a bot"
+            ) ||
+            text.includes(
+              "sign in to confirm you’re not a bot"
+            ) ||
+            text.includes(
+              "sign in to confirm you're not a bot"
+            ) ||
+            text.includes(
+              "this helps protect our community"
+            );
+
+          /*
+           * Checker infrastructure failure को
+           * permanent failure नहीं मानना है।
+           */
+          const isCheckerInfrastructureError =
+            /^checker HTTP (502|503|504)$/.test(
+              reason
+            ) ||
+            reason ===
+              "checker request failed" ||
+            reason ===
+              "puppeteer_error";
+
+          if (
+            isBotWall ||
+            isCheckerInfrastructureError
+          ) {
+            console.warn(
+              "⏭️ YOUTUBE CHECK INDETERMINATE - NOT AUTO-FAILED:",
+              videoId,
+              "|",
+              reason
+            );
+
+            return null;
+          }
+
+          /*
+           * केवल स्पष्ट real embed/player failures को reject करें।
+           */
+          const permanentPlayerFailure =
+            reasonLower ===
+              "watch video on youtube" ||
+            reasonLower ===
+              "watch on youtube" ||
+            reasonLower ===
+              "youtube पर देखें" ||
+            reasonLower ===
+              "youtube पर जाने के लिए क्लिक करें" ||
+            reasonLower ===
+              "video unavailable" ||
+            reasonLower ===
+              "this video is unavailable" ||
+            reasonLower ===
+              "यह वीडियो उपलब्ध नहीं है" ||
+            reasonLower ===
+              "error 153" ||
+            reasonLower ===
+              "error 163";
+
+          if (permanentPlayerFailure) {
+            console.warn(
+              "🚫 YOUTUBE REAL EMBED FAILURE:",
+              videoId,
+              "|",
+              reason
+            );
+
+            return null;
+          }
+
+          /*
+           * Unknown result भी permanent failure नहीं है।
+           */
+          console.warn(
+            "⏭️ YOUTUBE UNKNOWN CHECK RESULT - NOT AUTO-FAILED:",
+            videoId,
+            "|",
+            reason
+          );
+
+          return null;
+        }
+
+        /*
+         * केवल वास्तविक playable=true को 24-hour
+         * per-video Long playability cache में रखें।
+         */
+        saveYouTubeLongPlayabilityCached(
+          videoId,
+          check
+        );
+
+        return item;
+      })
+    );
+
+  for (
+    const verifiedItem of batchResults
+  ) {
+    if (verifiedItem) {
+      puppeteerVerifiedItems.push(
+        verifiedItem
+      );
+    }
+  }
+}
+
+const videos = puppeteerVerifiedItems.map(item => {
                     const videoId =
                       item.id.videoId;
 
