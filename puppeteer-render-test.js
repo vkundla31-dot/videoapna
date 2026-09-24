@@ -160,7 +160,10 @@ async function checkYouTubeEmbedPlayable(browser, videoId) {
         "this video is unavailable",
         "यह वीडियो उपलब्ध नहीं है",
         "error 153",
-        "error 163"
+        "error 163",
+        "sign in to confirm you’re not a bot",
+        "sign in to confirm you're not a bot",
+        "this helps protect our community"
       ];
 
       const blockedPattern =
