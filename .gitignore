@@ -51,3 +51,6 @@ public/app.syntax-error.js
 
 public/index.html.nav-backup
 server.js.render-backup
+
+# VideoApna generated YouTube cache
+data/youtube-long-cache.json

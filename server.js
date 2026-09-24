@@ -3954,6 +3954,93 @@ app.get(
   }
 );
 
+app.get(
+  "/api/recommendation/watched",
+  (req, res) => {
+
+    try {
+
+      const userId =
+        String(
+          req.query.userId || ""
+        ).trim();
+
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: "userId जरूरी है।"
+        });
+      }
+
+      const events =
+        readWatchEvents().filter(
+          event =>
+            String(event.userId || "").trim() ===
+            userId
+        );
+
+      const watchedIds = new Set();
+
+      for (const event of events) {
+
+        const videoId =
+          String(
+            event.videoId ||
+            event.uuid ||
+            ""
+          ).trim();
+
+        if (!videoId) continue;
+
+        /*
+         * सिर्फ वास्तव में देखे गए वीडियो को
+         * normal feed से हटाएँ।
+         *
+         * बहुत छोटा accidental open (<2 sec)
+         * watched नहीं माना जाएगा।
+         */
+        const seconds =
+          Math.max(
+            0,
+            Number(event.watchSeconds || 0)
+          );
+
+        const completed =
+          Boolean(event.completed);
+
+        if (
+          seconds >= 2 ||
+          completed
+        ) {
+          watchedIds.add(videoId);
+        }
+      }
+
+      return res.json({
+        success: true,
+        userId,
+        watchedIds: Array.from(watchedIds)
+      });
+
+    } catch (error) {
+
+      console.error(
+        "WATCHED IDS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        message:
+          "Watched videos पढ़ने में समस्या हुई।"
+      });
+
+    }
+  }
+);
+
+
+
 app.post(
   "/api/recommendation/watch",
   (req, res) => {
@@ -5415,12 +5502,20 @@ app.get("/api/youtube-search", (req, res) => {
     const https = require("https");
 
     // पहले Search API से वीडियो IDs निकालें
+    const pageToken =
+      String(req.query.pageToken || "").trim();
+
     const searchUrl =
       "https://www.googleapis.com/youtube/v3/search" +
       "?part=snippet" +
       "&q=" + encodeURIComponent(query) +
       "&type=video" +
-      "&maxResults=10" +
+      "&videoEmbeddable=true" +
+      "&videoSyndicated=true" +
+      "&maxResults=50" +
+      (pageToken
+        ? "&pageToken=" + encodeURIComponent(pageToken)
+        : "") +
       "&key=" + encodeURIComponent(key);
 
     https.get(searchUrl, searchRes => {
@@ -5430,7 +5525,7 @@ app.get("/api/youtube-search", (req, res) => {
         data += chunk;
       });
 
-      searchRes.on("end", () => {
+      searchRes.on("end", async () => {
         try {
           const json = JSON.parse(data);
 
@@ -5477,7 +5572,7 @@ app.get("/api/youtube-search", (req, res) => {
               statusData += chunk;
             });
 
-            statusRes.on("end", () => {
+            statusRes.on("end", async () => {
               try {
                 const statusJson = JSON.parse(statusData);
 
@@ -5504,7 +5599,7 @@ app.get("/api/youtube-search", (req, res) => {
                     .map(item => item.id)
                 );
 
-                const videos = items
+                let videos = items
                   .filter(item =>
                     item.id &&
                     item.id.videoId &&
@@ -5521,17 +5616,30 @@ app.get("/api/youtube-search", (req, res) => {
                       item.snippet.thumbnails?.default?.url
                   }));
 
+                /*
+                 * Scalable production mode:
+                 * YouTube API के embeddable + syndicated filters
+                 * ही primary server-side filters हैं।
+                 *
+                 * Puppeteer को हर candidate पर चलाना production
+                 * feed के लिए disabled है क्योंकि इससे latency,
+                 * false rejection और Render load बहुत बढ़ता है।
+                 */
+
                 console.log(
                   "YOUTUBE SEARCH:",
                   query,
                   "| Found:",
                   items.length,
                   "| Embeddable:",
-                  videos.length
+                  videos.length,
+                  "| Puppeteer: OFF"
                 );
 
                 res.json({
                   success: true,
+                  nextPageToken:
+                    json.nextPageToken || "",
                   videos
                 });
 
@@ -5591,6 +5699,856 @@ app.get("/api/youtube-search", (req, res) => {
     res.status(500).json({
       success: false,
       message: "YouTube search में server error आया।"
+    });
+  }
+});
+
+
+// ============================================================
+// YOUTUBE LONG VIDEO SEARCH
+// केवल वही videos लौटेंगे जो:
+// 1. YouTube में embeddable हों
+// 2. Duration 90 seconds से ज्यादा हो
+// 3. अगली page के लिए pagination token उपलब्ध हो
+// ============================================================
+
+
+// ============================================================
+// YOUTUBE LONG SERVER CACHE
+// केवल YouTube metadata/results cache होंगे।
+// Actual video file cache नहीं होगी.
+// ============================================================
+
+const YOUTUBE_LONG_CACHE_FILE =
+  path.join(
+    __dirname,
+    "data",
+    "youtube-long-cache.json"
+  );
+
+const YOUTUBE_LONG_CACHE_TTL_MS =
+  24 * 60 * 60 * 1000;
+
+let youtubeLongServerCache = {};
+
+// ============================================================
+// YOUTUBE LONG AUTO FAILED CACHE
+// केवल वे YouTube IDs रखी जाएँगी जिन्हें VideoApna player ने
+// वास्तविक embedding/player error के रूप में report किया है.
+// ============================================================
+
+const YOUTUBE_LONG_FAILED_FILE =
+  path.join(
+    __dirname,
+    "data",
+    "youtube-long-failed.json"
+  );
+
+let youtubeLongFailedCache = {};
+
+try {
+  if (fs.existsSync(YOUTUBE_LONG_FAILED_FILE)) {
+    const failedText =
+      fs.readFileSync(
+        YOUTUBE_LONG_FAILED_FILE,
+        "utf8"
+      );
+
+    const parsedFailed =
+      JSON.parse(failedText);
+
+    if (
+      parsedFailed &&
+      typeof parsedFailed === "object" &&
+      !Array.isArray(parsedFailed)
+    ) {
+      youtubeLongFailedCache = parsedFailed;
+    }
+  }
+} catch (error) {
+  console.warn(
+    "⚠️ YouTube Long failed cache load failed:",
+    error.message
+  );
+
+  youtubeLongFailedCache = {};
+}
+
+function isYouTubeLongAutoFailed(videoId) {
+  const id =
+    String(videoId || "").trim();
+
+  if (!id) {
+    return false;
+  }
+
+  return Boolean(
+    youtubeLongFailedCache[id]
+  );
+}
+
+function saveYouTubeLongAutoFailed(
+  videoId,
+  errorCode
+) {
+  const id =
+    String(videoId || "").trim();
+
+  if (!id) {
+    return false;
+  }
+
+  youtubeLongFailedCache[id] = {
+    failedAt: Date.now(),
+    errorCode: Number(errorCode || 0)
+  };
+
+  try {
+    fs.mkdirSync(
+      path.dirname(
+        YOUTUBE_LONG_FAILED_FILE
+      ),
+      {
+        recursive: true
+      }
+    );
+
+    fs.writeFileSync(
+      YOUTUBE_LONG_FAILED_FILE,
+      JSON.stringify(
+        youtubeLongFailedCache,
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    console.log(
+      "🚫 YouTube Long auto-failed saved:",
+      id,
+      "code:",
+      Number(errorCode || 0)
+    );
+
+    return true;
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long failed cache save failed:",
+      error.message
+    );
+
+    return false;
+  }
+}
+
+try {
+  if (
+    fs.existsSync(
+      YOUTUBE_LONG_CACHE_FILE
+    )
+  ) {
+    const cacheText =
+      fs.readFileSync(
+        YOUTUBE_LONG_CACHE_FILE,
+        "utf8"
+      );
+
+    const parsed =
+      JSON.parse(cacheText);
+
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
+      youtubeLongServerCache = parsed;
+    }
+  }
+} catch (error) {
+  console.warn(
+    "⚠️ YouTube Long cache load failed:",
+    error.message
+  );
+
+  youtubeLongServerCache = {};
+}
+
+function getYouTubeLongCacheKey(
+  query,
+  pageToken
+) {
+  return JSON.stringify({
+    version: "puppeteer-preflight-v1",
+
+    q:
+      String(query || "")
+        .trim()
+        .toLowerCase(),
+
+    pageToken:
+      String(pageToken || "")
+        .trim()
+  });
+}
+
+
+
+const VIDEOAPNA_PUPPETEER_CHECKER_URL =
+  String(
+    process.env.VIDEOAPNA_PUPPETEER_CHECKER_URL ||
+    "https://videoapna-puppeteer-test.onrender.com"
+  ).replace(/\/+$/, "");
+
+async function checkYouTubeLongWithPuppeteer(videoId) {
+  const id = String(videoId || "").trim();
+
+  if (!id) {
+    return {
+      playable: false,
+      reason: "missing videoId"
+    };
+  }
+
+  const url =
+    VIDEOAPNA_PUPPETEER_CHECKER_URL +
+    "/check?videoId=" +
+    encodeURIComponent(id);
+
+  try {
+    const response =
+      await fetch(url, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+
+    if (!response.ok) {
+      return {
+        playable: false,
+        reason: "checker HTTP " + response.status
+      };
+    }
+
+    const result =
+      await response.json();
+
+    return {
+      playable:
+        result &&
+        result.playable === true,
+
+      reason:
+        String(
+          result?.reason || ""
+        ),
+
+      text:
+        String(
+          result?.text || ""
+        )
+    };
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Puppeteer checker request failed:",
+      id,
+      error.message
+    );
+
+    return {
+      playable: false,
+      reason: "checker request failed"
+    };
+  }
+}
+
+const YOUTUBE_LONG_BLOCKED_IDS = new Set([
+  "kgBvRi0Dc2o"
+]);
+
+function isBlockedYouTubeLongVideo(videoId) {
+  return YOUTUBE_LONG_BLOCKED_IDS.has(
+    String(videoId || "").trim()
+  );
+}
+
+function isValidCachedYouTubeLongVideo(video) {
+  if (!video || typeof video !== "object") {
+    return false;
+  }
+
+  const videoId =
+    String(video.videoId || "").trim();
+
+  if (!videoId) {
+    return false;
+  }
+
+  if (isBlockedYouTubeLongVideo(videoId)) {
+    return false;
+  }
+
+  if (isYouTubeLongAutoFailed(videoId)) {
+    return false;
+  }
+
+  if (
+    String(video.source || "").toLowerCase() !==
+    "youtube"
+  ) {
+    return false;
+  }
+
+  const embedUrl =
+    String(video.embedUrl || "").trim();
+
+  if (!embedUrl) {
+    return false;
+  }
+
+  /*
+   * Cached YouTube Long videos में server ने
+   * पहले से verified duration रखा है।
+   */
+  const durationText =
+    String(video.duration || "");
+
+  const match =
+    durationText.match(
+      /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/
+    );
+
+  if (!match) {
+    return false;
+  }
+
+  const hours =
+    Number(match[1] || 0);
+
+  const minutes =
+    Number(match[2] || 0);
+
+  const seconds =
+    Number(match[3] || 0);
+
+  const totalSeconds =
+    (hours * 3600) +
+    (minutes * 60) +
+    seconds;
+
+  if (
+    !Number.isFinite(totalSeconds) ||
+    totalSeconds <= 90
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function getYouTubeLongCachedResult(
+  query,
+  pageToken
+) {
+  const key =
+    getYouTubeLongCacheKey(
+      query,
+      pageToken
+    );
+
+  const entry =
+    youtubeLongServerCache[key];
+
+  if (
+    !entry ||
+    !entry.savedAt ||
+    !Array.isArray(entry.videos)
+  ) {
+    return null;
+  }
+
+  const age =
+    Date.now() -
+    Number(entry.savedAt);
+
+  if (
+    !Number.isFinite(age) ||
+    age < 0 ||
+    age > YOUTUBE_LONG_CACHE_TTL_MS
+  ) {
+    delete youtubeLongServerCache[key];
+    return null;
+  }
+
+  return {
+    nextPageToken:
+      String(
+        entry.nextPageToken || ""
+      ),
+
+    videos:
+      entry.videos.filter(
+        isValidCachedYouTubeLongVideo
+      )
+  };
+}
+
+function saveYouTubeLongCachedResult(
+  query,
+  pageToken,
+  nextPageToken,
+  videos
+) {
+  const key =
+    getYouTubeLongCacheKey(
+      query,
+      pageToken
+    );
+
+  youtubeLongServerCache[key] = {
+    savedAt:
+      Date.now(),
+
+    nextPageToken:
+      String(
+        nextPageToken || ""
+      ),
+
+    videos:
+      Array.isArray(videos)
+        ? videos.slice()
+        : []
+  };
+
+  try {
+    fs.mkdirSync(
+      path.dirname(
+        YOUTUBE_LONG_CACHE_FILE
+      ),
+      {
+        recursive: true
+      }
+    );
+
+    fs.writeFileSync(
+      YOUTUBE_LONG_CACHE_FILE,
+      JSON.stringify(
+        youtubeLongServerCache,
+        null,
+        2
+      ),
+      "utf8"
+    );
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long cache save failed:",
+      error.message
+    );
+  }
+}
+
+app.get("/api/youtube-long-search", (req, res) => {
+  try {
+    const query = String(req.query.q || "").trim();
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        message: "Search शब्द डालें।"
+      });
+    }
+
+    const key = process.env.YOUTUBE_API_KEY;
+
+    if (!key) {
+      return res.status(500).json({
+        success: false,
+        message: "YouTube API key configured नहीं है।"
+      });
+    }
+
+    const https = require("https");
+
+    const pageToken = String(
+      req.query.pageToken || ""
+    ).trim();
+
+    // ==========================================================
+    // SERVER CACHE FIRST
+    // Same query + same pageToken होने पर
+    // YouTube API को दोबारा call नहीं करेंगे।
+    // ==========================================================
+
+    const cachedYouTubeLong =
+      getYouTubeLongCachedResult(
+        query,
+        pageToken
+      );
+
+    if (cachedYouTubeLong) {
+
+      console.log(
+        "✅ YOUTUBE LONG CACHE HIT:",
+        query,
+        "| page:",
+        pageToken
+          ? "NEXT"
+          : "FIRST",
+        "| videos:",
+        cachedYouTubeLong.videos.length
+      );
+
+      return res.json({
+        success: true,
+
+        nextPageToken:
+          cachedYouTubeLong.nextPageToken,
+
+        videos:
+          cachedYouTubeLong.videos
+      });
+    }
+
+    console.log(
+      "🌐 YOUTUBE LONG CACHE MISS:",
+      query,
+      "| page:",
+      pageToken
+        ? "NEXT"
+        : "FIRST"
+    );
+
+
+    const searchUrl =
+      "https://www.googleapis.com/youtube/v3/search" +
+      "?part=snippet" +
+      "&q=" + encodeURIComponent(query) +
+      "&type=video" +
+      "&videoEmbeddable=true" +
+      "&videoSyndicated=true" +
+      "&maxResults=50" +
+      (
+        pageToken
+          ? "&pageToken=" + encodeURIComponent(pageToken)
+          : ""
+      ) +
+      "&key=" + encodeURIComponent(key);
+
+    https.get(searchUrl, searchRes => {
+      let data = "";
+
+      searchRes.on("data", chunk => {
+        data += chunk;
+      });
+
+      searchRes.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+
+          if (json.error) {
+            console.error(
+              "YOUTUBE LONG SEARCH API ERROR:",
+              json.error
+            );
+
+            return res.status(502).json({
+              success: false,
+              message:
+                json.error.message ||
+                "YouTube API error"
+            });
+          }
+
+          const items = Array.isArray(json.items)
+            ? json.items
+            : [];
+
+          if (!items.length) {
+            return res.json({
+              success: true,
+              nextPageToken: "",
+              videos: []
+            });
+          }
+
+          const ids = items
+            .map(item =>
+              item.id &&
+              item.id.videoId
+            )
+            .filter(Boolean);
+
+          if (!ids.length) {
+            return res.json({
+              success: true,
+              nextPageToken:
+                json.nextPageToken || "",
+              videos: []
+            });
+          }
+
+          const detailsUrl =
+            "https://www.googleapis.com/youtube/v3/videos" +
+            "?part=status,contentDetails" +
+            "&id=" +
+            encodeURIComponent(ids.join(",")) +
+            "&key=" +
+            encodeURIComponent(key);
+
+          https.get(detailsUrl, detailsRes => {
+            let detailsData = "";
+
+            detailsRes.on("data", chunk => {
+              detailsData += chunk;
+            });
+
+            detailsRes.on("end", async () => {
+              try {
+                const detailsJson =
+                  JSON.parse(detailsData);
+
+                if (detailsJson.error) {
+                  console.error(
+                    "YOUTUBE LONG DETAILS API ERROR:",
+                    detailsJson.error
+                  );
+
+                  return res.status(502).json({
+                    success: false,
+                    message:
+                      detailsJson.error.message ||
+                      "YouTube video details error"
+                  });
+                }
+
+                const detailsMap = new Map();
+
+                for (const item of detailsJson.items || []) {
+                  detailsMap.set(item.id, item);
+                }
+
+                const candidateItems = items
+                  .filter(item => {
+                    const videoId =
+                      item.id &&
+                      item.id.videoId;
+
+                    if (!videoId) {
+                      return false;
+                    }
+
+                    if (isBlockedYouTubeLongVideo(videoId)) {
+                      return false;
+                    }
+
+                    // FILTER 2: VideoApna player ने पहले इस
+                    // YouTube video को वास्तविक player error
+                    // के रूप में report किया हो तो दोबारा न दिखाएँ।
+                    if (isYouTubeLongAutoFailed(videoId)) {
+                      return false;
+                    }
+
+                    const details =
+                      detailsMap.get(videoId);
+
+                    if (!details) {
+                      return false;
+                    }
+
+                    // FILTER 1: YouTube में embedding allowed
+                    if (
+                      !details.status ||
+                      details.status.embeddable !== true
+                    ) {
+                      return false;
+                    }
+
+                    // FILTER 2: YouTube processing पूरा हो चुका हो
+                    if (
+                      details.status.uploadStatus !== "processed"
+                    ) {
+                      return false;
+                    }
+
+                    // FILTER 3: केवल public YouTube videos
+                    if (
+                      details.status.privacyStatus &&
+                      details.status.privacyStatus !== "public"
+                    ) {
+                      return false;
+                    }
+
+                    // FILTER 4: duration > 90 seconds
+                    const duration = String(
+                      details.contentDetails?.duration || ""
+                    );
+
+                    const match = duration.match(
+                      /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/
+                    );
+
+                    if (!match) {
+                      return false;
+                    }
+
+                    const hours =
+                      Number(match[1] || 0);
+
+                    const minutes =
+                      Number(match[2] || 0);
+
+                    const seconds =
+                      Number(match[3] || 0);
+
+                    const totalSeconds =
+                      (hours * 3600) +
+                      (minutes * 60) +
+                      seconds;
+
+                    return totalSeconds > 90;
+                  });
+
+                /*
+                 * Scalable production mode:
+                 * YouTube API के embeddable + syndicated filters
+                 * और duration > 90 seconds filter के बाद
+                 * candidateItems सीधे Long Video feed में जाएंगे।
+                 *
+                 * Puppeteer per-video verification production में disabled है।
+                 */
+                const videos =
+                  candidateItems.map(item => {
+                    const videoId =
+                      item.id.videoId;
+
+                    const details =
+                      detailsMap.get(videoId);
+
+                    return {
+                      videoId,
+                      title:
+                        item.snippet.title,
+                      description:
+                        item.snippet.description,
+                      channelTitle:
+                        item.snippet.channelTitle,
+                      thumbnail:
+                        item.snippet.thumbnails?.high?.url ||
+                        item.snippet.thumbnails?.medium?.url ||
+                        item.snippet.thumbnails?.default?.url,
+                      duration:
+                        String(
+                          details.contentDetails?.duration || ""
+                        ),
+                      embedUrl:
+                        "https://www.youtube.com/embed/" +
+                        encodeURIComponent(videoId),
+                      source: "youtube",
+                      sourceName: "YouTube"
+                    };
+                  });
+
+                console.log(
+                  "YOUTUBE LONG SEARCH:",
+                  query,
+                  "| Found:",
+                  items.length,
+                  "| Valid Long:",
+                  videos.length
+                );
+
+                // ==================================================
+                // SAVE FILTERED RESULTS TO SERVER CACHE
+                // केवल valid Long videos cache होंगे।
+                // ==================================================
+
+                saveYouTubeLongCachedResult(
+                  query,
+                  pageToken,
+                  json.nextPageToken || "",
+                  videos
+                );
+
+                console.log(
+                  "💾 YOUTUBE LONG CACHE SAVED:",
+                  query,
+                  "| page:",
+                  pageToken
+                    ? "NEXT"
+                    : "FIRST",
+                  "| videos:",
+                  videos.length
+                );
+
+                return res.json({
+                  success: true,
+                  nextPageToken:
+                    json.nextPageToken || "",
+                  videos
+                });
+
+              } catch (error) {
+                console.error(
+                  "YOUTUBE LONG DETAILS RESPONSE ERROR:",
+                  error
+                );
+
+                return res.status(502).json({
+                  success: false,
+                  message:
+                    "YouTube long-video details response समझ नहीं आया।"
+                });
+              }
+            });
+          }).on("error", error => {
+            console.error(
+              "YOUTUBE LONG DETAILS NETWORK ERROR:",
+              error
+            );
+
+            return res.status(502).json({
+              success: false,
+              message:
+                "YouTube long-video details request failed।"
+            });
+          });
+
+        } catch (error) {
+          console.error(
+            "YOUTUBE LONG SEARCH RESPONSE ERROR:",
+            error
+          );
+
+          return res.status(502).json({
+            success: false,
+            message:
+              "YouTube long-video response समझ नहीं आया।"
+          });
+        }
+      });
+    }).on("error", error => {
+      console.error(
+        "YOUTUBE LONG SEARCH NETWORK ERROR:",
+        error
+      );
+
+      return res.status(502).json({
+        success: false,
+        message:
+          "YouTube long-video search request failed।"
+      });
+    });
+
+  } catch (error) {
+    console.error(
+      "YOUTUBE LONG SEARCH SERVER ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "YouTube long-video search में server error आया।"
     });
   }
 });
@@ -7158,6 +8116,70 @@ app.post(
 );
 
 
+
+
+/*
+ * ============================================================
+ * YOUTUBE LONG PLAYER AUTO-FAIL REPORT
+ * ============================================================
+ *
+ * Client-side YouTube IFrame API जब निश्चित embedded-playback
+ * failure (100/101/150) बताए, तब exact YouTube ID को server
+ * failed cache में रखा जाता है।
+ *
+ * 153 को जानबूझकर save नहीं करते क्योंकि वह referrer/origin
+ * configuration से जुड़ा हो सकता है और global false-positive
+ * पैदा कर सकता है।
+ * ============================================================
+ */
+app.post("/api/youtube-long-player-failed", (req, res) => {
+  try {
+    const videoId =
+      String(req.body && req.body.videoId || "").trim();
+
+    const errorCode =
+      Number(req.body && req.body.errorCode || 0);
+
+    const allowedCodes = new Set([100, 101, 150]);
+
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid YouTube video ID"
+      });
+    }
+
+    if (!allowedCodes.has(errorCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Unsupported YouTube player error"
+      });
+    }
+
+    const saved =
+      saveYouTubeLongAutoFailed(
+        videoId,
+        errorCode
+      );
+
+    return res.json({
+      success: Boolean(saved),
+      videoId,
+      errorCode
+    });
+
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long player report failed:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "YouTube player report save failed"
+    });
+  }
+});
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("");

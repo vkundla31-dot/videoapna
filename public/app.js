@@ -632,403 +632,995 @@ let longOwnVideos = [];
 let longOwnIndex = 0;
 let longBatchSize = 50;
 
-async function loadPeerTubeHome(query = "videos", append = false) {
-  if (peerTubeHomeLoading) return;
+// ============================================================
+// VIDEOAPNA LONG FEED STATE
+// ============================================================
+
+let youtubeLongPageTokens = {};
+let youtubeLongCategoryFinished = {};
+let youtubeLongVideos = [];
+let youtubeLongFailedIds = new Set();
+
+let longFeedLoadedKeys = new Set();
+let longFeedWatchedIds = new Set();
+
+let longFeedIsSearch = false;
+let longFeedFinished = false;
+
+let youtubeLongQueryIndex = 0;
+let youtubeLongQueries = [];
+
+let longFeedNextSource = "youtube";
+
+
+// ============================================================
+// LONG VIDEO KEYS / DUPLICATE PROTECTION
+// ============================================================
+
+function getLongVideoKeys(video) {
+
+  const keys = new Set();
+
+  const add = value => {
+
+    const text =
+      String(value || "").trim();
+
+    if (!text) return;
+
+    keys.add(text);
+
+    try {
+      keys.add(
+        decodeURIComponent(text)
+      );
+    } catch (e) {}
+
+    try {
+      keys.add(
+        encodeURI(text)
+      );
+    } catch (e) {}
+  };
+
+  add(video.vcdnVideoId);
+  add(video.youtubeVideoId);
+  add(video.videoId);
+  add(video.odyseeId);
+  add(video.claim_id);
+  add(video.uuid);
+  add(video.id);
+  add(video.url);
+  add(video.embedUrl);
+
+  const title =
+    String(video.title || "")
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+  const channel =
+    String(
+      video.channel ||
+      video.channelTitle ||
+      ""
+    )
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+  const duration =
+    Math.round(
+      Number(video.duration || 0)
+    );
+
+  if (title) {
+
+    add(
+      "title:" +
+      title +
+      "|channel:" +
+      channel +
+      "|duration:" +
+      duration
+    );
+  }
+
+  return Array.from(keys);
+}
+
+
+function isLongVideoDuplicate(video) {
+
+  const keys =
+    getLongVideoKeys(video);
+
+  return keys.some(
+    key =>
+      longFeedLoadedKeys.has(key)
+  );
+}
+
+
+function rememberLongVideo(video) {
+
+  const keys =
+    getLongVideoKeys(video);
+
+  keys.forEach(
+    key =>
+      longFeedLoadedKeys.add(key)
+  );
+}
+
+
+function isLongVideoWatched(video) {
+
+  if (longFeedIsSearch) {
+    return false;
+  }
+
+  const keys =
+    getLongVideoKeys(video);
+
+  return keys.some(
+    key =>
+      longFeedWatchedIds.has(key)
+  );
+}
+
+
+// ============================================================
+// VIDEOAPNA PLAYABLE FILTER
+// ============================================================
+
+function isPlayableVideoApnaLong(video) {
+
+  const duration =
+    Number(video.duration || 0);
+
+  return (
+    Number.isFinite(duration) &&
+    duration > 90
+  );
+}
+
+
+// ============================================================
+// ODYSEE PLAYABLE FILTER
+// ============================================================
+
+function isPlayableOdyseeLong(video) {
+
+  const duration =
+    Number(video.duration || 0);
+
+  if (
+    !Number.isFinite(duration) ||
+    duration <= 90
+  ) {
+    return false;
+  }
+
+  const embedUrl =
+    String(video.embedUrl || "").trim();
+
+  return Boolean(embedUrl);
+}
+
+
+// ============================================================
+// WATCHED IDS
+// ============================================================
+
+async function loadLongFeedWatchedIds() {
+
+  longFeedWatchedIds =
+    new Set();
+
+  if (
+    longFeedIsSearch ||
+    typeof VIDEOAPNA_USER_ID !==
+      "string" ||
+    !VIDEOAPNA_USER_ID
+  ) {
+    return;
+  }
+
+  try {
+
+    const response =
+      await fetch(
+        "/api/recommendation/watched?userId=" +
+        encodeURIComponent(
+          VIDEOAPNA_USER_ID
+        )
+      );
+
+    const data =
+      await response.json();
+
+    if (
+      response.ok &&
+      data.success &&
+      Array.isArray(
+        data.watchedIds
+      )
+    ) {
+
+      for (
+        const id of data.watchedIds
+      ) {
+
+        const key =
+          String(id || "").trim();
+
+        if (key) {
+          longFeedWatchedIds.add(
+            key
+          );
+        }
+      }
+    }
+
+  } catch (error) {
+
+    console.warn(
+      "⚠️ Watched IDs नहीं मिले:",
+      error.message
+    );
+  }
+}
+
+
+// ============================================================
+// YOUTUBE QUERY LIST
+// ============================================================
+
+function getLongYouTubeQueries(
+  queryText
+) {
+
+  const text =
+    String(queryText || "").trim();
+
+  if (
+    text &&
+    text !== "videos" &&
+    text !== "सभी" &&
+    text !== "मनोरंजन" &&
+    text !== "संगीत" &&
+    text !== "शिक्षा" &&
+    text !== "न्यूज़" &&
+    text !== "खेल"
+  ) {
+    return [text];
+  }
+
+  const queryMap = {
+
+    "videos": [
+      "hindi full video",
+      "hindi comedy full video",
+      "hindi songs full",
+      "hindi bhajan full",
+      "hindi documentary",
+      "hindi news",
+      "hindi education",
+      "indian sports full"
+    ],
+
+    "सभी": [
+      "hindi full video",
+      "hindi comedy full video",
+      "hindi songs full",
+      "hindi bhajan full",
+      "hindi documentary",
+      "hindi news",
+      "hindi education",
+      "indian sports full"
+    ],
+
+    "मनोरंजन": [
+      "hindi entertainment full",
+      "hindi comedy full video",
+      "indian entertainment full",
+      "hindi movie clips long"
+    ],
+
+    "संगीत": [
+      "hindi songs full",
+      "hindi music full",
+      "hindi bhajan full",
+      "indian music full"
+    ],
+
+    "शिक्षा": [
+      "hindi education",
+      "hindi tutorial",
+      "hindi learning",
+      "india education"
+    ],
+
+    "न्यूज़": [
+      "hindi news",
+      "india news hindi",
+      "hindi news analysis",
+      "hindi current affairs"
+    ],
+
+    "खेल": [
+      "hindi cricket",
+      "hindi sports",
+      "india cricket full",
+      "sports hindi"
+    ]
+
+  };
+
+  return (
+    queryMap[text] ||
+    queryMap["सभी"]
+  ).slice();
+}
+
+
+// ============================================================
+// ONE YOUTUBE PAGE
+// ============================================================
+
+async function loadOneLongYouTubePage() {
+  console.log(
+    "🚨 YOUTUBE FUNCTION ENTER:",
+    "queryIndex=",
+    youtubeLongQueryIndex,
+    "queries=",
+    youtubeLongQueries.length
+  );
+
+  while (
+    youtubeLongQueryIndex <
+    youtubeLongQueries.length
+  ) {
+
+    const query =
+      youtubeLongQueries[
+        youtubeLongQueryIndex
+      ];
+
+    if (
+      youtubeLongCategoryFinished[
+        query
+      ]
+    ) {
+
+      youtubeLongQueryIndex++;
+      continue;
+    }
+
+    const pageToken =
+      String(
+        youtubeLongPageTokens[
+          query
+        ] || ""
+      ).trim();
+
+    let apiPath =
+      "/api/youtube-long-search?q=" +
+      encodeURIComponent(query);
+
+    if (pageToken) {
+
+      apiPath +=
+        "&pageToken=" +
+        encodeURIComponent(
+          pageToken
+        );
+    }
+
+    const response =
+      await fetch(apiPath);
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !data.success
+    ) {
+
+      youtubeLongCategoryFinished[
+        query
+      ] = true;
+
+      youtubeLongQueryIndex++;
+
+      continue;
+    }
+
+    const incoming =
+      Array.isArray(data.videos)
+        ? data.videos
+        : [];
+
+    let added = 0;
+
+    console.log(
+      "🔎 YOUTUBE LONG PAGE:",
+      "query=",
+      query,
+      "| incoming=",
+      incoming.length
+    );
+
+    for (
+      const video of incoming
+    ) {
+
+      const videoId =
+        String(
+          video.videoId || ""
+        ).trim();
+
+      if (!videoId) continue;
+
+      if (
+        youtubeLongFailedIds.has(
+          videoId
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        String(
+          video.source || ""
+        ).toLowerCase() !==
+        "youtube"
+      ) {
+        continue;
+      }
+
+      if (
+        !String(
+          video.embedUrl || ""
+        ).trim()
+      ) {
+        continue;
+      }
+
+      console.log(
+        "🎯 YOUTUBE LONG ACCEPT:",
+        videoId,
+        "| title=",
+        video.title || ""
+      );
+
+      const candidate = {
+        ...video,
+        source: "youtube",
+        sourceName: "YouTube",
+        youtubeVideoId: videoId
+      };
+
+      if (
+        isLongVideoDuplicate(
+          candidate
+        )
+      ) {
+        continue;
+      }
+
+      if (
+        isLongVideoWatched(
+          candidate
+        )
+      ) {
+        continue;
+      }
+
+      youtubeLongVideos.push(
+        candidate
+      );
+
+      peerTubeVideos.push(
+        candidate
+      );
+
+      rememberLongVideo(
+        candidate
+      );
+
+      added++;
+    }
+
+    const nextPageToken =
+      String(
+        data.nextPageToken || ""
+      ).trim();
+
+    if (nextPageToken) {
+
+      youtubeLongPageTokens[
+        query
+      ] = nextPageToken;
+
+    } else {
+
+      youtubeLongCategoryFinished[
+        query
+      ] = true;
+
+      youtubeLongQueryIndex++;
+    }
+
+    return added;
+  }
+
+  return 0;
+}
+
+
+// ============================================================
+// ONE ODYSEE PAGE
+// ============================================================
+
+async function loadOneLongOdyseePage(
+  queryText
+) {
+
+  const isHomeFeed =
+    String(queryText || "")
+      .trim()
+      .toLowerCase() ===
+    "videos";
+
+  const odyseeQuery =
+    isHomeFeed
+      ? "hindi long video"
+      : queryText;
+
+  const apiPath =
+    "/api/odysee-search?q=" +
+    encodeURIComponent(
+      odyseeQuery
+    ) +
+    "&start=" +
+    String(
+      odyseeHomeStart
+    );
+
+  const response =
+    await fetch(apiPath);
+
+  const data =
+    await response.json();
+
+  if (
+    !response.ok ||
+    !data.success
+  ) {
+
+    odyseeHomeFinished =
+      true;
+
+    return 0;
+  }
+
+  const incoming =
+    Array.isArray(data.videos)
+      ? data.videos
+      : [];
+
+  if (!incoming.length) {
+
+    odyseeHomeFinished =
+      true;
+
+    return 0;
+  }
+
+  let added = 0;
+
+  for (
+    const rawVideo of incoming
+  ) {
+
+    const video = {
+      ...rawVideo,
+      source: "odysee",
+      sourceName: "Odysee",
+      id:
+        rawVideo.id ||
+        (
+          "odysee-" +
+          String(
+            rawVideo.odyseeId ||
+            rawVideo.claim_id ||
+            ""
+          )
+        )
+    };
+
+    if (
+      !isPlayableOdyseeLong(
+        video
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      isLongVideoDuplicate(
+        video
+      )
+    ) {
+      continue;
+    }
+
+    if (
+      isLongVideoWatched(
+        video
+      )
+    ) {
+      continue;
+    }
+
+    odyseeVideos.push(
+      video
+    );
+
+    peerTubeVideos.push(
+      video
+    );
+
+    rememberLongVideo(
+      video
+    );
+
+    added++;
+  }
+
+  odyseeHomeStart +=
+    Math.max(
+      incoming.length,
+      20
+    );
+
+  return added;
+}
+
+
+// ============================================================
+// MAIN LONG FEED
+// ============================================================
+
+async function loadPeerTubeHome(
+  query = "videos",
+  append = false
+) {
+
+  console.log(
+    "🚨 LONG LOAD CALL:",
+    "query=",
+    String(query || ""),
+    "| append=",
+    append,
+    "| loading=",
+    peerTubeHomeLoading
+  );
+
+  if (peerTubeHomeLoading) {
+    return;
+  }
 
   const BATCH_SIZE = 50;
 
+  const queryText =
+    String(query || "").trim();
+
+  const categoryNames =
+    new Set([
+      "videos",
+      "सभी",
+      "मनोरंजन",
+      "संगीत",
+      "शिक्षा",
+      "न्यूज़",
+      "खेल"
+    ]);
+
+  longFeedIsSearch =
+    !categoryNames.has(
+      queryText
+    );
+
   if (!append) {
+
     peerTubeHomeStart = 0;
-    peerTubeHomeFinished = false;
-    peerTubeHomeQuery = query;
+
+    peerTubeHomeFinished =
+      true;
+
+    peerTubeHomeQuery =
+      queryText;
 
     peerTubeVideos = [];
 
     odyseeHomeStart = 0;
     odyseeHomeFinished = false;
-    odyseeHomeQuery = "hindi bhajan";
+
     odyseeVideos = [];
 
-    longOwnVideos = getVideoApnaPublicVideos(query);
+    youtubeLongPageTokens = {};
+    youtubeLongCategoryFinished = {};
+    youtubeLongVideos = [];
+    youtubeLongFailedIds =
+      new Set();
+
+    longFeedLoadedKeys =
+      new Set();
+
+    longFeedWatchedIds =
+      new Set();
+
+    longFeedFinished =
+      false;
+
+    youtubeLongQueryIndex =
+      0;
+
+    youtubeLongQueries =
+      getLongYouTubeQueries(
+        queryText
+      );
+
+    longFeedNextSource =
+      "youtube";
+
+    longOwnVideos =
+      getVideoApnaPublicVideos(
+        queryText
+      ).filter(
+        video =>
+          isPlayableVideoApnaLong(
+            video
+          )
+      );
+
     longOwnIndex = 0;
-    longBatchSize = BATCH_SIZE;
+    longBatchSize =
+      BATCH_SIZE;
+
+    await loadLongFeedWatchedIds();
   }
 
-  peerTubeHomeLoading = true;
+  peerTubeHomeLoading =
+    true;
 
-  const requestId = ++peerTubeRequestId;
+  const requestId =
+    ++peerTubeRequestId;
 
   try {
-    resultCount.textContent = append
-      ? "⏳ अगले 50 वीडियो लोड हो रहे हैं..."
-      : "⏳ पहले 50 वीडियो लोड हो रहे हैं...";
 
-    noResults.classList.add("hidden");
+    resultCount.textContent =
+      append
+        ? "⏳ अगले 50 वीडियो लोड हो रहे हैं..."
+        : "⏳ पहले 50 वीडियो लोड हो रहे हैं...";
 
-    /*
-     * ==========================================================
-     * VIDEOAPNA LONG — UNIFIED 50 BATCH
-     * ==========================================================
-     *
-     * हर request में अधिकतम 50 नए videos जोड़ेंगे।
-     *
-     * Order:
-     * 1. अपने VideoApna videos
-     * 2. Odysee Long (>90 sec)
-     * 3. PeerTube Long (>90 sec)
-     *
-     * 50 कोई maximum नहीं है।
-     * 50 के बाद अगला 50, फिर अगला 50...
-     */
-
-    const batchStartCount = [
-      ...longOwnVideos.slice(longOwnIndex),
-      ...odyseeVideos,
-      ...peerTubeVideos
-    ].length;
+    noResults.classList.add(
+      "hidden"
+    );
 
     let addedThisBatch = 0;
 
-    /*
-     * ==========================================================
-     * 1. VIDEOAPNA OWN VIDEOS
-     * ==========================================================
-     *
-     * अपने videos की duration पर कोई सीमा नहीं।
-     * VCDN/native/local playable VideoApna videos allowed.
-     */
+    // ========================================================
+    // SOURCE 1: OWN VIDEOAPNA
+    // ========================================================
 
     while (
-      longOwnIndex < longOwnVideos.length &&
-      addedThisBatch < BATCH_SIZE
+      longOwnIndex <
+        longOwnVideos.length &&
+      addedThisBatch <
+        BATCH_SIZE
     ) {
-      const video = longOwnVideos[longOwnIndex++];
-      const key = String(
-        video.id ||
-        video.vcdnVideoId ||
-        video.url ||
-        video.title ||
-        ""
-      );
 
-      const exists = [...odyseeVideos, ...peerTubeVideos].some(
-        item =>
-          String(
-            item.id ||
-            item.vcdnVideoId ||
-            item.url ||
-            item.title ||
-            ""
-          ) === key
-      );
-
-      if (!exists) {
-        peerTubeVideos.push({
-          ...video,
-          source: "videoapna"
-        });
-
-        addedThisBatch++;
-      }
-    }
-
-    /*
-     * अगर अपने videos से 50 पूरे हो गये,
-     * तो इस request में external source की जरूरत नहीं।
-     */
-
-    /*
-     * ==========================================================
-     * 2. ODYSEE LONG
-     * ==========================================================
-     *
-     * केवल >90 seconds.
-     * Odysee pages में Shorts भी आते हैं, इसलिए खाली Long मिलने पर
-     * अगला page लगातार माँगा जाएगा।
-     */
-
-    const queryText = String(query || "").trim();
-    const explicitEnglish =
-      /\benglish\b/i.test(queryText) ||
-      /अंग्रेजी|इंग्लिश/.test(queryText);
-
-    const isHomeFeed =
-      queryText.toLowerCase() === "videos";
-
-    const hindiIntent = !explicitEnglish;
-
-    const odyseeQuery = isHomeFeed
-      ? "hindi bhajan"
-      : queryText;
-
-    while (
-      addedThisBatch < BATCH_SIZE &&
-      hindiIntent &&
-      !odyseeHomeFinished
-    ) {
-      const apiPath =
-        "/api/odysee-search?q=" +
-        encodeURIComponent(odyseeQuery) +
-        "&start=" +
-        odyseeHomeStart;
-
-      const response = await fetch(apiPath);
-      const data = await response.json();
-
-      if (requestId !== peerTubeRequestId) return;
-
-      if (!response.ok || !data.success) {
-        throw new Error(
-          data.message || "Odysee search failed"
-        );
-      }
-
-      const incoming =
-        Array.isArray(data.videos)
-          ? data.videos
-          : [];
-
-      /*
-       * सचमुच खाली response = Odysee खत्म।
-       */
-      if (!incoming.length) {
-        odyseeHomeFinished = true;
-        break;
-      }
-
-      const normalized = incoming
-        .map(video => ({
-          ...video,
-          source: "odysee",
-          id:
-            video.id ||
-            ("odysee-" +
-              String(
-                video.odyseeId ||
-                video.claim_id ||
-                Math.random()
-              ))
-        }))
-        .filter(video => {
-          const duration =
-            Number(video.duration || 0);
-
-          return (
-            !!video.embedUrl &&
-            duration > 90
-          );
-        });
-
-      const existingIds = new Set(
-        [
-          ...odyseeVideos,
-          ...peerTubeVideos
-        ].map(video =>
-          String(
-            video.odyseeId ||
-            video.id ||
-            video.embedUrl ||
-            video.url ||
-            ""
-          )
-        )
-      );
-
-      for (const video of normalized) {
-        if (addedThisBatch >= BATCH_SIZE) break;
-
-        const key = String(
-          video.odyseeId ||
-          video.id ||
-          video.embedUrl ||
-          video.url ||
-          ""
-        );
-
-        if (!existingIds.has(key)) {
-          existingIds.add(key);
-          odyseeVideos.push(video);
-          addedThisBatch++;
-        }
-      }
-
-      /*
-       * अगला Odysee page.
-       * Incoming page size के हिसाब से आगे बढ़ेंगे।
-       */
-      odyseeHomeStart += Math.max(
-        incoming.length,
-        20
-      );
-
-      /*
-       * अगर page में केवल Shorts थे तो loop अगला page लेगा।
-       */
-    }
-
-    /*
-     * ==========================================================
-     * 3. PEERTUBE LONG
-     * ==========================================================
-     *
-     * केवल >90 seconds.
-     */
-
-    while (
-      addedThisBatch < BATCH_SIZE &&
-      !hindiIntent &&
-      !peerTubeHomeFinished
-    ) {
-      const apiPath =
-        "/api/peertube-search?q=" +
-        encodeURIComponent(queryText) +
-        "&start=" +
-        peerTubeHomeStart;
-
-      const response = await fetch(apiPath);
-      const data = await response.json();
-
-      if (requestId !== peerTubeRequestId) return;
-
-      if (!response.ok || !data.success) {
-        throw new Error(
-          data.message || "PeerTube search failed"
-        );
-      }
-
-      const incoming =
-        Array.isArray(data.videos)
-          ? data.videos
-          : [];
-
-      if (!incoming.length) {
-        peerTubeHomeFinished = true;
-        break;
-      }
-
-      const normalized = incoming
-        .map(video =>
-          normalizePeerTubeVideo(video)
-        )
-        .filter(video => {
-          const duration =
-            Number(video.duration || 0);
-
-          return (
-            duration > 90 &&
-            !!video.url
-          );
-        });
-
-      const existingIds = new Set(
-        [
-          ...peerTubeVideos,
-          ...odyseeVideos
-        ].map(video =>
-          String(
-            video.uuid ||
-            video.id ||
-            video.url ||
-            ""
-          )
-        )
-      );
-
-      for (const video of normalized) {
-        if (addedThisBatch >= BATCH_SIZE) break;
-
-        const key = String(
-          video.uuid ||
-          video.id ||
-          video.url ||
-          ""
-        );
-
-        if (!existingIds.has(key)) {
-          existingIds.add(key);
-          peerTubeVideos.push(video);
-          addedThisBatch++;
-        }
-      }
-
-      peerTubeHomeStart += Math.max(
-        incoming.length,
-        20
-      );
-
-      const total =
-        Number(data.total || 0);
+      const video =
+        longOwnVideos[
+          longOwnIndex++
+        ];
 
       if (
-        total > 0 &&
-        peerTubeHomeStart >= total
+        isLongVideoDuplicate(
+          video
+        )
       ) {
-        peerTubeHomeFinished = true;
+        continue;
+      }
+
+      if (
+        isLongVideoWatched(
+          video
+        )
+      ) {
+        continue;
+      }
+
+      const candidate = {
+        ...video,
+        source: "videoapna"
+      };
+
+      peerTubeVideos.push(
+        candidate
+      );
+
+      rememberLongVideo(
+        candidate
+      );
+
+      addedThisBatch++;
+    }
+
+    // ========================================================
+    // SOURCE 2: YOUTUBE
+    // SOURCE 3: ODYSEE
+    // SOURCE 4: YOUTUBE NEXT PAGE
+    // SOURCE 5: ODYSEE NEXT PAGE
+    // ...
+    //
+    // जब तक 50 VALID videos नहीं मिलते, sources घूमते रहेंगे।
+    // ========================================================
+
+    let safety = 0;
+
+    while (
+      addedThisBatch <
+        BATCH_SIZE &&
+      !longFeedFinished &&
+      safety < 100
+    ) {
+
+      safety++;
+
+      if (
+        requestId !==
+        peerTubeRequestId
+      ) {
+        return;
+      }
+
+      const before =
+        addedThisBatch;
+
+      const youtubeFinished =
+        youtubeLongQueryIndex >=
+        youtubeLongQueries.length;
+
+      if (!youtubeFinished) {
+        const added =
+          await loadOneLongYouTubePage();
+
+        addedThisBatch +=
+          added;
+
+        longFeedNextSource =
+          "youtube";
+      } else {
+        const added =
+          await loadOneLongOdyseePage(
+            queryText
+          );
+
+        addedThisBatch +=
+          added;
+
+        longFeedNextSource =
+          "odysee";
+      }
+
+
+
+      const odyseeFinished =
+        odyseeHomeFinished;
+
+      if (
+        youtubeFinished &&
+        odyseeFinished
+      ) {
+
+        longFeedFinished =
+          true;
+
+        break;
+      }
+
+      if (
+        before ===
+          addedThisBatch &&
+        safety >= 99
+      ) {
+
+        longFeedFinished =
+          true;
       }
     }
 
-    /*
-     * ==========================================================
-     * FINAL MERGE
-     * ==========================================================
-     *
-     * VideoApna हमेशा सबसे पहले।
-     * उसके बाद Odysee।
-     * फिर PeerTube।
-     */
+    // ========================================================
+    // FINAL UNIQUE LIST
+    // ========================================================
+
+    console.log(
+      "🔎 LONG DEBUG BEFORE UNIQUE:",
+      "peerTubeVideos=",
+      peerTubeVideos.length,
+      "| youtubeLongVideos=",
+      youtubeLongVideos.length,
+      "| odyseeVideos=",
+      odyseeVideos.length,
+      "| addedThisBatch=",
+      addedThisBatch
+    );
 
     const combined = [
-      ...peerTubeVideos.filter(
-        video =>
-          String(video.source || "").toLowerCase() ===
-          "videoapna"
-      ),
-      ...odyseeVideos,
-      ...peerTubeVideos.filter(
-        video =>
-          String(video.source || "").toLowerCase() !==
-          "videoapna"
-      )
+      ...peerTubeVideos
     ];
 
-    /*
-     * Duplicate protection.
-     */
-    const uniqueMap = new Map();
+    const uniqueMap =
+      new Map();
 
-    for (const video of combined) {
-      const key = String(
-        (video.source || "video") +
-        ":" +
-        (
-          video.vcdnVideoId ||
-          video.uuid ||
-          video.odyseeId ||
-          video.id ||
-          video.url ||
-          video.title ||
-          ""
-        )
-      );
+    for (
+      const video of combined
+    ) {
 
-      if (!uniqueMap.has(key)) {
-        uniqueMap.set(key, video);
+      const keys =
+        getLongVideoKeys(
+          video
+        );
+
+      const duplicate =
+        keys.some(
+          key =>
+            uniqueMap.has(key)
+        );
+
+      if (duplicate) {
+        continue;
       }
+
+      const primaryKey =
+        keys[0] ||
+        (
+          "fallback:" +
+          String(
+            uniqueMap.size
+          )
+        );
+
+      uniqueMap.set(
+        primaryKey,
+        video
+      );
     }
 
     let normalized =
-      Array.from(uniqueMap.values());
+      Array.from(
+        uniqueMap.values()
+      );
 
-    /*
-     * Recommendation केवल existing videos का order बदल सकती है।
-     * कोई video remove नहीं होगा।
-     */
+    // ========================================================
+    // RECOMMENDATION = ONLY REORDER
+    // ========================================================
+
     if (
       normalized.length > 0 &&
-      typeof VIDEOAPNA_USER_ID === "string" &&
+      typeof VIDEOAPNA_USER_ID ===
+        "string" &&
       VIDEOAPNA_USER_ID
     ) {
+
       try {
+
         const recommendationResponse =
           await fetch(
             "/api/recommendation/feed",
@@ -1038,26 +1630,34 @@ async function loadPeerTubeHome(query = "videos", append = false) {
                 "Content-Type":
                   "application/json"
               },
-              body: JSON.stringify({
-                userId:
-                  VIDEOAPNA_USER_ID,
-                videos:
-                  normalized.map(video => ({
-                    id: video.id,
-                    uuid:
-                      video.uuid || "",
-                    title:
-                      video.title,
-                    language:
-                      video.language,
-                    category:
-                      video.category,
-                    createdAt:
-                      video.createdAt || "",
-                    publishedAt:
-                      video.publishedAt || ""
-                  }))
-              })
+              body:
+                JSON.stringify({
+                  userId:
+                    VIDEOAPNA_USER_ID,
+
+                  videos:
+                    normalized.map(
+                      video => ({
+                        id:
+                          video.id,
+                        uuid:
+                          video.uuid ||
+                          "",
+                        title:
+                          video.title,
+                        language:
+                          video.language,
+                        category:
+                          video.category,
+                        createdAt:
+                          video.createdAt ||
+                          "",
+                        publishedAt:
+                          video.publishedAt ||
+                          ""
+                      })
+                    )
+                })
             }
           );
 
@@ -1071,76 +1671,155 @@ async function loadPeerTubeHome(query = "videos", append = false) {
             recommendationData.videos
           )
         ) {
-          const order =
-            recommendationData.videos
-              .map(video =>
-                String(
-                  video.uuid ||
-                  video.id ||
-                  ""
-                )
-              )
-              .filter(Boolean);
 
-          const videoMap =
-            new Map(
-              normalized.map(video => [
-                String(
-                  video.uuid ||
-                  video.id ||
-                  ""
-                ),
-                video
-              ])
+          const originalKeys =
+            new Set(
+              normalized.map(
+                video =>
+                  String(
+                    video.uuid ||
+                    video.id ||
+                    ""
+                  )
+              )
             );
 
-          const rankedVideos = [];
-
-          for (const key of order) {
-            const video =
-              videoMap.get(key);
-
-            if (video) {
-              rankedVideos.push(video);
-              videoMap.delete(key);
-            }
-          }
-
-          for (const video of videoMap.values()) {
-            rankedVideos.push(video);
-          }
+          const returnedKeys =
+            recommendationData.videos
+              .map(
+                video =>
+                  String(
+                    video.uuid ||
+                    video.id ||
+                    ""
+                  )
+              )
+              .filter(
+                key =>
+                  originalKeys.has(
+                    key
+                  )
+              );
 
           if (
-            rankedVideos.length ===
-            normalized.length
+            returnedKeys.length ===
+              normalized.length &&
+            new Set(
+              returnedKeys
+            ).size ===
+              normalized.length
           ) {
-            normalized =
-              rankedVideos;
+
+            const videoMap =
+              new Map(
+                normalized.map(
+                  video => [
+                    String(
+                      video.uuid ||
+                      video.id ||
+                      ""
+                    ),
+                    video
+                  ]
+                )
+              );
+
+            const rankedVideos =
+              [];
+
+            for (
+              const key of
+              returnedKeys
+            ) {
+
+              const video =
+                videoMap.get(
+                  key
+                );
+
+              if (video) {
+                rankedVideos.push(
+                  video
+                );
+              }
+            }
+
+            if (
+              rankedVideos.length ===
+              normalized.length
+            ) {
+
+              normalized =
+                rankedVideos;
+            }
           }
         }
-      } catch (recommendationError) {
+
+      } catch (
+        recommendationError
+      ) {
+
         console.warn(
-          "⚠️ Recommendation connection failed; original order kept:",
+          "⚠️ Recommendation failed; original order kept:",
           recommendationError.message
         );
       }
     }
 
-    /*
-     * ==========================================================
-     * RESULT
-     * ==========================================================
-     */
+    // ========================================================
+    // RESULT
+    // ========================================================
+
+    console.log(
+      "🔥 LONG FINAL DEBUG:",
+      "peerTubeVideos=",
+      peerTubeVideos.length,
+      "| normalized=",
+      normalized.length,
+      "| YouTube=",
+      youtubeLongVideos.length,
+      "| Odysee=",
+      odyseeVideos.length,
+      "| addedThisBatch=",
+      addedThisBatch
+    );
 
     if (!normalized.length) {
+
       list.innerHTML = "";
+
       resultCount.textContent =
-        "कोई Long वीडियो नहीं मिला";
-      noResults.classList.remove("hidden");
+        "DEBUG — PeerTube: " +
+        peerTubeVideos.length +
+        " | YouTube: " +
+        youtubeLongVideos.length +
+        " | Odysee: " +
+        odyseeVideos.length +
+        " | Added: " +
+        addedThisBatch;
+
+      console.log(
+        "🔥 LONG EMPTY:",
+        "peerTubeVideos=",
+        peerTubeVideos.length,
+        "| YouTube=",
+        youtubeLongVideos.length,
+        "| Odysee=",
+        odyseeVideos.length,
+        "| Added=",
+        addedThisBatch
+      );
+
+      noResults.classList.remove(
+        "hidden"
+      );
+
       return;
     }
 
-    showPeerTubeVideos(normalized);
+    showPeerTubeVideos(
+      normalized
+    );
 
     resultCount.textContent =
       "Long वीडियो: " +
@@ -1152,83 +1831,59 @@ async function loadPeerTubeHome(query = "videos", append = false) {
       "| Total:",
       normalized.length,
       "| Own:",
-      longOwnIndex,
-      "/",
+      longOwnIndex +
+      "/" +
       longOwnVideos.length,
+      "| YouTube:",
+      youtubeLongVideos.length,
       "| Odysee:",
       odyseeVideos.length,
-      "| PeerTube:",
-      peerTubeVideos.filter(
-        video =>
-          String(video.source || "").toLowerCase() ===
-          "peertube"
-      ).length
+      "| Search:",
+      longFeedIsSearch,
+      "| Finished:",
+      longFeedFinished
     );
 
   } catch (error) {
+
     console.error(
-      "VIDEOAPNA HOME ERROR:",
+      "❌ VIDEOAPNA LONG FEED ERROR:",
       error
     );
 
-    if (
-      requestId !== peerTubeRequestId
-    ) {
-      return;
-    }
-
-    const ownVideos =
-      getVideoApnaPublicVideos(query);
-
-    if (ownVideos.length > 0) {
-      showPeerTubeVideos(
-        ownVideos
-      );
-
-      resultCount.textContent =
-        "VideoApna वीडियो: " +
-        ownVideos.length;
-    } else {
-      list.innerHTML = "";
-      resultCount.textContent =
-        "वीडियो लोड नहीं हो पाए";
-      noResults.classList.remove(
-        "hidden"
-      );
-    }
+    resultCount.textContent =
+      "वीडियो लोड करने में समस्या हुई";
 
   } finally {
-    peerTubeHomeLoading = false;
+
+    peerTubeHomeLoading =
+      false;
   }
 }
 
+
+// ============================================================
+// NEXT 50 — ALL CATEGORIES + SEARCH
+// ============================================================
+
 function loadMorePeerTubeHome() {
+
   if (
-    peerTubeHomeQuery === "videos" &&
-    !peerTubeHomeLoading
+    peerTubeHomeLoading ||
+    longFeedFinished
   ) {
-    const ownFinished =
-      longOwnIndex >=
-      longOwnVideos.length;
-
-    const externalFinished =
-      odyseeHomeFinished &&
-      peerTubeHomeFinished;
-
-    if (
-      !ownFinished ||
-      !externalFinished
-    ) {
-      console.log(
-        "⏳ VIDEOAPNA LONG: अगला 50 batch लोड हो रहा है..."
-      );
-
-      loadPeerTubeHome(
-        peerTubeHomeQuery,
-        true
-      );
-    }
+    return;
   }
+
+  console.log(
+    "⏳ VIDEOAPNA LONG: अगला 50 batch..."
+  );
+
+  loadPeerTubeHome(
+    peerTubeHomeQuery ||
+    "videos",
+    true
+  );
 }
 
 // PEERTUBE HOME INFINITE SCROLL
@@ -1342,9 +1997,31 @@ async function reportVideo(video) {
 }
 
 function normalizeVideoApnaVideo(video) {
+  const rawId =
+    String(video.id || "").trim();
+
+  const vcdnVideoId =
+    String(
+      video.vcdnVideoId ||
+      video.vcdnId ||
+      ""
+    ).trim();
+
+  const existingEmbedUrl =
+    String(video.embedUrl || "").trim();
+
+  const vcdnEmbedUrl =
+    existingEmbedUrl ||
+    (
+      vcdnVideoId
+        ? "https://embed.vcdn.me/embed/" +
+          encodeURIComponent(vcdnVideoId)
+        : ""
+    );
+
   return {
     ...video,
-    id: "va-" + String(video.id || ""),
+    id: "va-" + rawId,
     source: "videoapna",
     title: video.title || "VideoApna Video",
     description: video.description || "",
@@ -1353,7 +2030,8 @@ function normalizeVideoApnaVideo(video) {
       video.thumbnail ||
       "https://dummyimage.com/640x360/111/fff.png&text=VideoApna",
     url: video.url || "",
-    embedUrl: "",
+    embedUrl: vcdnEmbedUrl,
+    vcdnVideoId: vcdnVideoId,
     views: video.views || "0 views",
     viewCount: Number(video.viewCount || 0),
     likes: Number(video.likes || 0),
@@ -1489,7 +2167,11 @@ function showPeerTubeVideos(items) {
             video.source || ""
           ).toLowerCase();
 
-        if (source === "videoapna") {
+        if (source === "youtube") {
+          openYouTubeLongWatchingPage(
+            video
+          );
+        } else if (source === "videoapna") {
           openVideoApnaWatchingPage(
             video
           );
@@ -2458,6 +3140,7 @@ function openVideoApnaWatchingPage(video) {
             background:#000;
           "
           allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+          referrerpolicy="strict-origin-when-cross-origin"
           allowfullscreen>
         </iframe>
       `
@@ -2577,6 +3260,131 @@ function openVideoApnaWatchingPage(video) {
   `;
 
   document.body.appendChild(page);
+
+  /*
+   * =========================================
+   * YOUTUBE LONG → NEXT VIDEOS
+   * =========================================
+   */
+
+  const nextVideoList =
+    document.getElementById(
+      "youtubeLongNextVideoList"
+    );
+
+  if (
+    nextVideoList &&
+    Array.isArray(currentLongHomeVideos)
+  ) {
+
+    const currentId = String(
+      video.youtubeVideoId ||
+      video.videoId ||
+      ""
+    ).trim();
+
+    const nextVideos =
+      currentLongHomeVideos.filter(item => {
+
+        const itemSource =
+          String(
+            item.source || ""
+          ).toLowerCase();
+
+        const itemId = String(
+          item.youtubeVideoId ||
+          item.videoId ||
+          item.vcdnVideoId ||
+          item.id ||
+          ""
+        ).trim();
+
+        return !(
+          itemSource === "youtube" &&
+          itemId === currentId
+        );
+      });
+
+    nextVideoList.innerHTML = "";
+
+    nextVideos.slice(0, 20).forEach(
+      selectedVideo => {
+
+        const card =
+          document.createElement("div");
+
+        card.style.padding = "12px";
+        card.style.marginBottom = "8px";
+        card.style.border = "1px solid #ddd";
+        card.style.borderRadius = "10px";
+        card.style.cursor = "pointer";
+        card.style.background = "#fff";
+
+        const title =
+          document.createElement("div");
+
+        title.style.fontWeight = "600";
+        title.textContent =
+          selectedVideo.title ||
+          "Untitled Video";
+
+        const meta =
+          document.createElement("div");
+
+        meta.style.fontSize = "13px";
+        meta.style.marginTop = "5px";
+        meta.style.opacity = "0.7";
+
+        meta.textContent =
+          (
+            selectedVideo.channel ||
+            selectedVideo.channelTitle ||
+            selectedVideo.sourceName ||
+            selectedVideo.source ||
+            ""
+          );
+
+        card.appendChild(title);
+        card.appendChild(meta);
+
+        card.addEventListener(
+          "click",
+          function() {
+
+            const source =
+              String(
+                selectedVideo.source || ""
+              ).toLowerCase();
+
+            if (source === "youtube") {
+              openYouTubeLongWatchingPage(
+                selectedVideo
+              );
+            } else if (source === "videoapna") {
+              openVideoApnaWatchingPage(
+                selectedVideo
+              );
+            } else if (source === "odysee") {
+              openOdyseeWatchingPage(
+                selectedVideo
+              );
+            } else {
+              openPeerTubeWatchingPage(
+                selectedVideo
+              );
+            }
+          }
+        );
+
+        nextVideoList.appendChild(card);
+      }
+    );
+
+    if (!nextVideos.length) {
+      nextVideoList.innerHTML =
+        '<div style="padding:12px;opacity:.7;">अगला वीडियो उपलब्ध नहीं है।</div>';
+    }
+  }
 
   const backBtn =
     document.getElementById("videoApnaWatchBack");
@@ -2912,7 +3720,11 @@ function openVideoApnaWatchingPage(video) {
                   selectedVideo.source || ""
                 ).toLowerCase();
 
-              if (source === "odysee") {
+              if (source === "youtube") {
+                openYouTubeLongWatchingPage(
+                  selectedVideo
+                );
+              } else if (source === "odysee") {
                 openOdyseeWatchingPage(
                   selectedVideo
                 );
@@ -3084,6 +3896,1469 @@ function openVideoApnaWatchingPage(video) {
   });
 }
 
+
+/*
+ * ============================================================
+ * YOUTUBE LONG VIDEO AUTO FILTER
+ *
+ * अगर YouTube IFrame API बताए कि वीडियो embedded playback
+ * के लिए उपलब्ध नहीं है, तो उस exact YouTube ID को:
+ *
+ * 1. youtubeLongVideos से हटाएँ
+ * 2. currentLongHomeVideos से हटाएँ
+ * 3. failed ID list में डालें
+ * 4. Watching page बंद करें
+ *
+ * YouTube पर कोई external redirect नहीं होगा।
+ * ============================================================
+ */
+
+function removeFailedYouTubeLong(
+  video,
+  errorCode
+) {
+
+  const videoId =
+    String(
+      video &&
+      (
+        video.youtubeVideoId ||
+        video.videoId ||
+        ""
+      )
+    ).trim();
+
+  if (!videoId) {
+    console.warn(
+      "⚠️ Blocked YouTube Long की ID नहीं मिली।"
+    );
+    return;
+  }
+
+  console.warn(
+    "⛔ YouTube Long embedded video blocked:",
+    errorCode,
+    videoId,
+    video && video.title
+      ? video.title
+      : ""
+  );
+
+  /*
+   * Server को केवल deterministic YouTube embedding failures
+   * report करें। 153 को global cache में नहीं डालेंगे।
+   */
+  const serverReportCode = Number(errorCode);
+
+  if ([100, 101, 150].includes(serverReportCode)) {
+    fetch("/api/youtube-long-player-failed", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        videoId: videoId,
+        errorCode: serverReportCode
+      })
+    })
+      .then(function (response) {
+        return response.json().catch(function () {
+          return {};
+        });
+      })
+      .then(function (data) {
+        console.log(
+          "📡 YouTube Long player failure reported:",
+          videoId,
+          serverReportCode,
+          data && data.success
+        );
+      })
+      .catch(function (error) {
+        console.warn(
+          "⚠️ YouTube Long player report request failed:",
+          error && error.message
+            ? error.message
+            : error
+        );
+      });
+  }
+
+  /*
+   * 1. इस ID को permanently failed list में रखें
+   *    ताकि current session में दोबारा न आए।
+   */
+  if (
+    typeof youtubeLongFailedIds !==
+    "undefined" &&
+    youtubeLongFailedIds &&
+    typeof youtubeLongFailedIds.add ===
+    "function"
+  ) {
+    youtubeLongFailedIds.add(videoId);
+  }
+
+  /*
+   * 2. youtubeLongVideos से EXACT ID हटाएँ।
+   */
+  if (
+    typeof youtubeLongVideos !==
+    "undefined" &&
+    Array.isArray(youtubeLongVideos)
+  ) {
+
+    youtubeLongVideos =
+      youtubeLongVideos.filter(
+        function (item) {
+
+          const itemId =
+            String(
+              item &&
+              (
+                item.youtubeVideoId ||
+                item.videoId ||
+                ""
+              )
+            ).trim();
+
+          return itemId !== videoId;
+        }
+      );
+  }
+
+  /*
+   * 3. Home की current Long Video list से भी
+   *    EXACT YouTube ID हटाएँ।
+   */
+  if (
+    typeof currentLongHomeVideos !==
+    "undefined" &&
+    Array.isArray(currentLongHomeVideos)
+  ) {
+
+    currentLongHomeVideos =
+      currentLongHomeVideos.filter(
+        function (item) {
+
+          const itemSource =
+            String(
+              item &&
+              item.source ||
+              ""
+            ).toLowerCase();
+
+          if (itemSource !== "youtube") {
+            return true;
+          }
+
+          const itemId =
+            String(
+              item &&
+              (
+                item.youtubeVideoId ||
+                item.videoId ||
+                ""
+              )
+            ).trim();
+
+          return itemId !== videoId;
+        }
+      );
+  }
+
+  /*
+   * 4. Watching page बंद करें।
+   *
+   * YouTube पर redirect नहीं करेंगे।
+   */
+  const page =
+    document.getElementById(
+      "watchingPage"
+    );
+
+  if (page) {
+    page.remove();
+  }
+
+  /*
+   * 5. User को blocked video दिखाते हुए
+   *    अटका हुआ player नहीं रहने देंगे।
+   */
+  console.log(
+    "🗑️ YouTube Long automatically removed:",
+    videoId
+  );
+}
+
+
+/*
+ * ============================================================
+ * YOUTUBE LONG VIDEO PREFLIGHT
+ *
+ * वीडियो को youtubeLongVideos में डालने से पहले:
+ * - YouTube IFrame API से hidden player बनाओ
+ * - onReady = embedded playback accepted
+ * - blocked error = video reject
+ *
+ * इससे blocked YouTube Long videos feed में आने से पहले
+ * ही रोक दिए जाते हैं।
+ * ============================================================
+ */
+
+async function preflightYouTubeLong(video) {
+
+  const videoId =
+    String(
+      video &&
+      (
+        video.youtubeVideoId ||
+        video.videoId ||
+        ""
+      )
+    ).trim();
+
+  if (!videoId) {
+    return false;
+  }
+
+  /*
+   * Current session में पहले से blocked ID है तो
+   * दोबारा test नहीं करेंगे।
+   */
+  if (
+    typeof youtubeLongFailedIds !== "undefined" &&
+    youtubeLongFailedIds &&
+    youtubeLongFailedIds.has(videoId)
+  ) {
+    return false;
+  }
+
+  try {
+
+    const YT =
+      await ensureVideoApnaYouTubeAPI();
+
+    if (
+      !YT ||
+      !YT.Player
+    ) {
+      console.warn(
+        "⚠️ YouTube IFrame API उपलब्ध नहीं:",
+        videoId
+      );
+      return false;
+    }
+
+    const host =
+      document.createElement("div");
+
+    host.style.position = "fixed";
+    host.style.left = "-10000px";
+    host.style.top = "-10000px";
+    host.style.width = "1px";
+    host.style.height = "1px";
+    host.style.opacity = "0";
+    host.style.pointerEvents = "none";
+
+    document.body.appendChild(host);
+
+    let player = null;
+    let settled = false;
+    let timeout = null;
+
+    return await new Promise(function(resolve) {
+
+      const cleanup = function() {
+
+        if (timeout) {
+          clearTimeout(timeout);
+          timeout = null;
+        }
+
+        try {
+          if (
+            player &&
+            typeof player.destroy === "function"
+          ) {
+            player.destroy();
+          }
+        } catch (e) {}
+
+        try {
+          if (host && host.parentNode) {
+            host.parentNode.removeChild(host);
+          }
+        } catch (e) {}
+      };
+
+      const markFailed = function(errorCode) {
+
+        if (settled) return;
+
+        settled = true;
+
+        console.warn(
+          "⛔ YouTube Long preflight blocked:",
+          errorCode,
+          videoId,
+          video && video.title
+            ? video.title
+            : ""
+        );
+
+        if (
+          typeof youtubeLongFailedIds !== "undefined" &&
+          youtubeLongFailedIds &&
+          typeof youtubeLongFailedIds.add === "function"
+        ) {
+          youtubeLongFailedIds.add(videoId);
+        }
+
+        cleanup();
+        resolve(false);
+      };
+
+      const markAllowed = function() {
+
+        if (settled) return;
+
+        settled = true;
+
+        console.log(
+          "✅ YouTube Long preflight OK:",
+          videoId
+        );
+
+        cleanup();
+        resolve(true);
+      };
+
+      /*
+       * केवल बहुत लंबा wait नहीं करेंगे।
+       * Normal YouTube player को response देने के लिए 5 seconds।
+       */
+      timeout =
+        setTimeout(function() {
+
+          /*
+           * Timeout को blocked मानना जरूरी नहीं है।
+           * Network/API slow होने पर valid video reject हो सकता है,
+           * इसलिए timeout में ID को failed list में नहीं डालेंगे।
+           *
+           * लेकिन feed में डालने से पहले test पूरा होना जरूरी है।
+           */
+          if (!settled) {
+
+            console.warn(
+              "⚠️ YouTube Long preflight timeout:",
+              videoId
+            );
+
+            settled = true;
+            cleanup();
+
+            /*
+             * Timeout = uncertain.
+             * इस batch में video नहीं डालेंगे।
+             */
+            resolve(false);
+          }
+
+        }, 10000);
+
+      try {
+
+        player =
+          new YT.Player(
+            host,
+            {
+              width: "1",
+              height: "1",
+
+              videoId: videoId,
+
+              playerVars: {
+                autoplay: 0,
+                controls: 0,
+                playsinline: 1,
+                enablejsapi: 1,
+                origin:
+                  window.location.origin
+              },
+
+              events: {
+
+                onReady: function() {
+
+                  /*
+                   * Player तैयार हो गया।
+                   *
+                   * अब muted playback attempt करेंगे।
+                   * Embedding-disabled / private / unavailable
+                   * videos इसी चरण में IFrame error दे सकते हैं।
+                   */
+                  try {
+
+                    if (
+                      player &&
+                      typeof player.mute === "function"
+                    ) {
+                      player.mute();
+                    }
+
+                    if (
+                      player &&
+                      typeof player.playVideo === "function"
+                    ) {
+                      player.playVideo();
+                    }
+
+                  } catch (error) {
+
+                    console.warn(
+                      "⚠️ YouTube Long preflight play error:",
+                      videoId,
+                      error &&
+                      error.message
+                        ? error.message
+                        : error
+                    );
+                  }
+
+                  /*
+                   * कुछ valid videos में autoplay/browser policy
+                   * के कारण PLAYING event नहीं आएगा।
+                   *
+                   * इसलिए actual blocking error न मिलने पर
+                   * थोड़ी देर बाद इसे allowed मानेंगे।
+                   */
+                  setTimeout(function() {
+
+                    if (!settled) {
+                      markAllowed();
+                    }
+
+                  }, 1800);
+                },
+
+                onError: function(event) {
+
+                  const code =
+                    Number(
+                      event &&
+                      event.data
+                    );
+
+                  /*
+                   * YouTube IFrame errors:
+                   * 2   invalid parameter
+                   * 5   HTML5 player error
+                   * 100 video unavailable/private
+                   * 101 embedding disabled
+                   * 150 embedding disabled
+                   * 153 missing required client/origin
+                   */
+                  const blockedCodes = [
+                    2,
+                    5,
+                    100,
+                    101,
+                    150,
+                    153
+                  ];
+
+                  if (
+                    blockedCodes.includes(code)
+                  ) {
+                    markFailed(code);
+                    return;
+                  }
+
+                  /*
+                   * Unknown YouTube error भी safe side पर
+                   * इस video को इस batch में reject करेंगे।
+                   */
+                  markFailed(
+                    code || "unknown"
+                  );
+                }
+
+              }
+            }
+          );
+
+      } catch (error) {
+
+        markFailed(
+          error &&
+          error.message
+            ? error.message
+            : "player-create-error"
+        );
+
+      }
+
+    });
+
+  } catch (error) {
+
+    console.warn(
+      "⚠️ YouTube Long preflight failed:",
+      error &&
+      error.message
+        ? error.message
+        : error
+    );
+
+    return false;
+  }
+}
+
+function monitorYouTubeLong(
+  iframe,
+  video
+) {
+
+  if (!iframe || !video) {
+    return;
+  }
+
+  if (
+    String(
+      video.source || ""
+    ).toLowerCase() !==
+    "youtube"
+  ) {
+    return;
+  }
+
+  const videoId =
+    String(
+      video.youtubeVideoId ||
+      video.videoId ||
+      ""
+    ).trim();
+
+  if (!videoId) {
+    return;
+  }
+
+  ensureVideoApnaYouTubeAPI()
+    .then(function (YT) {
+
+      if (
+        !YT ||
+        !YT.Player ||
+        !iframe ||
+        !iframe.isConnected
+      ) {
+        return;
+      }
+
+      try {
+
+        new YT.Player(
+          iframe,
+          {
+            videoId: videoId,
+            playerVars: {
+              autoplay: 1,
+              controls: 1,
+              playsinline: 1,
+              origin: window.location.origin
+            },
+            events: {
+
+              onError: function (event) {
+
+                const code =
+                  Number(
+                    event &&
+                    event.data
+                  );
+
+                /*
+                 * YouTube IFrame Player errors:
+                 *
+                 * 2   = invalid parameter
+                 * 5   = HTML5 player error
+                 * 100 = video not found/private
+                 * 101 = embedding disabled
+                 * 150 = embedding disabled
+                 * 153 = missing required client/origin
+                 */
+                const blockedCodes = [
+                  2,
+                  5,
+                  100,
+                  101,
+                  150,
+                  153
+                ];
+
+                console.warn(
+                  "🎬 YouTube Long Player Error:",
+                  code,
+                  videoId,
+                  video.title || ""
+                );
+
+                if (
+                  blockedCodes.includes(
+                    code
+                  )
+                ) {
+
+                  removeFailedYouTubeLong(
+                    video,
+                    code
+                  );
+
+                }
+
+              }
+
+            }
+          }
+        );
+
+      } catch (error) {
+
+        console.warn(
+          "⚠️ YouTube Long monitor error:",
+          error &&
+          error.message
+            ? error.message
+            : error
+        );
+
+      }
+
+    })
+    .catch(function (error) {
+
+      console.warn(
+        "⚠️ YouTube IFrame API load failed:",
+        error &&
+        error.message
+          ? error.message
+          : error
+      );
+
+    });
+}
+
+
+function openYouTubeLongWatchingPage(video) {
+
+  const oldPage =
+    document.getElementById("watchingPage");
+
+  if (oldPage) oldPage.remove();
+
+  const page =
+    document.createElement("div");
+
+  page.id = "watchingPage";
+
+  const videoId =
+    String(
+      video.youtubeVideoId ||
+      video.videoId ||
+      ""
+    ).trim();
+
+  if (!videoId) {
+    alert("इस YouTube वीडियो का player उपलब्ध नहीं है।");
+    return;
+  }
+
+  const origin =
+    encodeURIComponent(
+      window.location.origin
+    );
+
+  const playerUrl =
+    "https://www.youtube.com/embed/" +
+    encodeURIComponent(videoId) +
+    "?autoplay=1" +
+    "&controls=1" +
+    "&playsinline=1" +
+    "&enablejsapi=1" +
+    "&origin=" +
+    origin +
+    "&widget_referrer=" +
+    encodeURIComponent(window.location.href);
+
+  page.innerHTML = `
+    <div class="watch-header">
+
+      <button id="youtubeLongWatchBack">
+        ←
+      </button>
+
+      <strong>VideoApna</strong>
+
+    </div>
+
+    <div class="watch-content">
+
+      <div
+        class="watch-player"
+        style="
+          width:100%;
+          background:#000;
+          aspect-ratio:16/9;
+        "
+      >
+
+        <iframe
+          id="youtubeLongEmbedPlayer"
+          src="${escapeHtml(playerUrl)}"
+          title="${escapeHtml(
+            video.title || "VideoApna Video"
+          )}"
+          style="
+            width:100%;
+            height:100%;
+            border:0;
+            display:block;
+            background:#000;
+          "
+          allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allowfullscreen>
+        </iframe>
+
+      </div>
+
+      <div class="watch-info">
+
+        <h2
+          id="youtubeLongTitleToggle"
+          role="button"
+          tabindex="0"
+          style="
+            cursor:pointer;
+            margin-bottom:8px;
+          "
+          title="विवरण खोलने के लिए क्लिक करें"
+        >
+          ${escapeHtml(
+            video.title || "Untitled Video"
+          )}
+        </h2>
+
+        <div class="watch-meta">
+
+          ${escapeHtml(
+            video.channel ||
+            video.channelTitle ||
+            "YouTube"
+          )}
+
+          •
+
+          ${escapeHtml(
+            video.views ||
+            "0 views"
+          )}
+
+          • YouTube
+
+        </div>
+
+        <div class="watch-actions">
+
+          <button id="youtubeLongLikeBtn">
+            ❤️ Like
+          </button>
+
+          <button id="youtubeLongShareBtn">
+            ↗️ Share
+          </button>
+
+          <button id="youtubeLongSaveBtn">
+            🔖 Save
+          </button>
+
+          <button id="youtubeLongReportBtn">
+            🚩 Report
+          </button>
+
+        </div>
+
+        <div
+          id="youtubeLongDescription"
+          class="description"
+          style="display:none;"
+        >
+
+          <h3>वीडियो के बारे में</h3>
+
+          <p>
+            ${escapeHtml(
+              video.description ||
+              "यह वीडियो YouTube से VideoApna पर उपलब्ध है।"
+            )}
+          </p>
+
+        </div>
+
+        <div class="next-videos">
+
+          <h3>🎬 अगला वीडियो</h3>
+
+          <div id="youtubeLongNextVideoList"></div>
+
+        </div>
+
+      </div>
+
+    </div>
+  `;
+
+  document.body.appendChild(page);
+
+  /*
+   * YouTube Long iframe पर IFrame API error monitor लगाएँ।
+   * इससे embedding-disabled / unavailable videos detect होंगे।
+   */
+  const youtubeLongIframe =
+    document.getElementById("youtubeLongEmbedPlayer");
+
+  if (youtubeLongIframe) {
+    monitorYouTubeLong(
+      youtubeLongIframe,
+      video
+    );
+  }
+
+  /*
+   * =========================================
+   * NEXT LONG VIDEOS
+   * =========================================
+   */
+
+  const nextList =
+    document.getElementById(
+      "youtubeLongNextVideoList"
+    );
+
+  if (nextList) {
+
+    const allHomeVideos =
+      Array.isArray(
+        currentLongHomeVideos
+      )
+        ? currentLongHomeVideos
+        : [];
+
+    const currentYoutubeId =
+      String(
+        video.youtubeVideoId ||
+        video.videoId ||
+        ""
+      ).trim();
+
+    const nextVideos =
+      allHomeVideos.filter(
+        videoItem => {
+
+          if (!videoItem) {
+            return false;
+          }
+
+          const itemSource =
+            String(
+              videoItem.source || ""
+            ).toLowerCase();
+
+          const itemId =
+            String(
+              videoItem.youtubeVideoId ||
+              videoItem.videoId ||
+              videoItem.uuid ||
+              videoItem.vcdnVideoId ||
+              videoItem.odyseeId ||
+              videoItem.id ||
+              ""
+            ).trim();
+
+          /*
+           * Current YouTube video को list में
+           * दोबारा नहीं दिखाना।
+           */
+          if (
+            itemSource === "youtube" &&
+            itemId === currentYoutubeId
+          ) {
+            return false;
+          }
+
+          return true;
+
+        }
+      );
+
+
+    if (!nextVideos.length) {
+
+      nextList.innerHTML =
+        '<p style="opacity:.7;">अभी कोई और Home Long वीडियो उपलब्ध नहीं है।</p>';
+
+    } else {
+
+      nextList.innerHTML =
+        nextVideos
+          .map(nextVideo => {
+
+            const thumb =
+              String(
+                nextVideo.thumbnail ||
+                nextVideo.posterUrl ||
+                nextVideo.thumbnailUrl ||
+                ""
+              ).trim();
+
+            const description =
+              String(
+                nextVideo.description ||
+                "इस वीडियो का विवरण उपलब्ध नहीं है।"
+              );
+
+            const source =
+              String(
+                nextVideo.source ||
+                "videoapna"
+              ).toLowerCase();
+
+            const sourceName =
+              source === "youtube"
+                ? "YouTube"
+                : source === "odysee"
+                ? "Odysee"
+                : source === "peertube"
+                ? "PeerTube"
+                : "VideoApna";
+
+            const itemId =
+              String(
+                nextVideo.youtubeVideoId ||
+                nextVideo.videoId ||
+                nextVideo.uuid ||
+                nextVideo.vcdnVideoId ||
+                nextVideo.odyseeId ||
+                nextVideo.id ||
+                ""
+              ).trim();
+
+            return `
+              <div
+                class="next-video-item"
+                data-video-id="${escapeHtml(itemId)}"
+                data-source="${escapeHtml(source)}"
+                style="
+                  padding:12px 0;
+                  border-bottom:1px solid rgba(128,128,128,.20);
+                "
+              >
+
+                <div
+                  class="next-video-play"
+                  data-video-id="${escapeHtml(itemId)}"
+                  data-source="${escapeHtml(source)}"
+                  style="
+                    display:flex;
+                    gap:12px;
+                    cursor:pointer;
+                    align-items:center;
+                  "
+                >
+
+                  <div
+                    class="next-video-thumb"
+                    style="
+                      width:140px;
+                      min-width:140px;
+                      height:80px;
+                      overflow:hidden;
+                      border-radius:8px;
+                      background:#222;
+                    "
+                  >
+
+                    ${
+                      thumb
+                        ? `
+                          <img
+                            src="${escapeHtml(thumb)}"
+                            alt="${escapeHtml(
+                              nextVideo.title ||
+                              "Video"
+                            )}"
+                            loading="lazy"
+                            style="
+                              width:100%;
+                              height:100%;
+                              object-fit:cover;
+                            "
+                          >
+                        `
+                        : `
+                          <div
+                            style="
+                              width:100%;
+                              height:100%;
+                              display:flex;
+                              align-items:center;
+                              justify-content:center;
+                              font-size:28px;
+                              color:#fff;
+                            "
+                          >
+                            ▶️
+                          </div>
+                        `
+                    }
+
+                  </div>
+
+                </div>
+
+                <div
+                  class="next-video-title"
+                  role="button"
+                  tabindex="0"
+                  title="विवरण खोलने के लिए क्लिक करें"
+                  style="
+                    margin-top:8px;
+                    cursor:pointer;
+                    font-weight:600;
+                    line-height:1.4;
+                  "
+                >
+                  ${escapeHtml(
+                    nextVideo.title ||
+                    "Untitled Video"
+                  )}
+                </div>
+
+                <div
+                  class="next-video-meta"
+                  style="
+                    margin-top:4px;
+                    font-size:13px;
+                    opacity:.7;
+                  "
+                >
+
+                  ${escapeHtml(
+                    nextVideo.channel ||
+                    nextVideo.channelTitle ||
+                    nextVideo.author ||
+                    "VideoApna"
+                  )}
+
+                  •
+
+                  ${escapeHtml(
+                    nextVideo.views ||
+                    "0 views"
+                  )}
+
+                  •
+
+                  ${escapeHtml(
+                    sourceName
+                  )}
+
+                </div>
+
+                <div
+                  class="next-video-description"
+                  style="
+                    display:none;
+                    margin:10px 0 2px 0;
+                    padding:10px;
+                    border-radius:8px;
+                    background:rgba(128,128,128,.10);
+                    line-height:1.5;
+                    opacity:.9;
+                  "
+                >
+                  ${escapeHtml(description)}
+                </div>
+
+              </div>
+            `;
+
+          })
+          .join("");
+
+
+      /*
+       * =========================================
+       * NEXT VIDEO CLICK
+       * =========================================
+       */
+
+      nextList
+        .querySelectorAll(
+          ".next-video-play"
+        )
+        .forEach(playArea => {
+
+          playArea.addEventListener(
+            "click",
+            event => {
+
+              event.preventDefault();
+              event.stopPropagation();
+
+              const id =
+                String(
+                  playArea.getAttribute(
+                    "data-video-id"
+                  ) || ""
+                );
+
+              const source =
+                String(
+                  playArea.getAttribute(
+                    "data-source"
+                  ) || ""
+                ).toLowerCase();
+
+              const selectedVideo =
+                nextVideos.find(
+                  item => {
+
+                    const itemId =
+                      String(
+                        item.youtubeVideoId ||
+                        item.videoId ||
+                        item.uuid ||
+                        item.vcdnVideoId ||
+                        item.odyseeId ||
+                        item.id ||
+                        ""
+                      ).trim();
+
+                    return (
+                      itemId === id
+                    );
+
+                  }
+                );
+
+              if (!selectedVideo) {
+                return;
+              }
+
+              if (
+                source ===
+                "youtube"
+              ) {
+
+                openYouTubeLongWatchingPage(
+                  selectedVideo
+                );
+
+              } else if (
+                source ===
+                "odysee"
+              ) {
+
+                openOdyseeWatchingPage(
+                  selectedVideo
+                );
+
+              } else if (
+                source ===
+                "peertube"
+              ) {
+
+                openPeerTubeWatchingPage(
+                  selectedVideo
+                );
+
+              } else {
+
+                openVideoApnaWatchingPage(
+                  selectedVideo
+                );
+
+              }
+
+            }
+          );
+
+        });
+
+
+      /*
+       * =========================================
+       * NEXT VIDEO TITLE → DESCRIPTION
+       * =========================================
+       */
+
+      nextList
+        .querySelectorAll(
+          ".next-video-title"
+        )
+        .forEach(titleElement => {
+
+          const toggleDescription = () => {
+
+            const item =
+              titleElement.closest(
+                ".next-video-item"
+              );
+
+            if (!item) {
+              return;
+            }
+
+            const descriptionBox =
+              item.querySelector(
+                ".next-video-description"
+              );
+
+            if (!descriptionBox) {
+              return;
+            }
+
+            const isHidden =
+              descriptionBox.style.display ===
+              "none";
+
+            descriptionBox.style.display =
+              isHidden
+                ? "block"
+                : "none";
+
+            titleElement.title =
+              isHidden
+                ? "विवरण बंद करने के लिए क्लिक करें"
+                : "विवरण खोलने के लिए क्लिक करें";
+
+          };
+
+
+          titleElement.addEventListener(
+            "click",
+            event => {
+
+              event.preventDefault();
+              event.stopPropagation();
+
+              toggleDescription();
+
+            }
+          );
+
+
+          titleElement.addEventListener(
+            "keydown",
+            event => {
+
+              if (
+                event.key === "Enter" ||
+                event.key === " "
+              ) {
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                toggleDescription();
+
+              }
+
+            }
+          );
+
+        });
+
+    }
+
+  }
+
+
+  /*
+   * =========================================
+   * SHARE
+   * =========================================
+   */
+
+  const shareBtn =
+    document.getElementById(
+      "youtubeLongShareBtn"
+    );
+
+  if (shareBtn) {
+
+    shareBtn.addEventListener(
+      "click",
+      async () => {
+
+        /*
+         * बाहरी YouTube URL नहीं।
+         * केवल VideoApna का internal share URL।
+         */
+        const shareUrl =
+          window.location.origin +
+          "/watch/youtube/" +
+          encodeURIComponent(
+            videoId
+          );
+
+        try {
+
+          if (navigator.share) {
+
+            await navigator.share({
+              title:
+                video.title ||
+                "VideoApna Video",
+              text:
+                "VideoApna पर यह वीडियो देखें: " +
+                (
+                  video.title ||
+                  ""
+                ),
+              url: shareUrl
+            });
+
+          } else if (
+            navigator.clipboard
+          ) {
+
+            await navigator.clipboard.writeText(
+              shareUrl
+            );
+
+            alert(
+              "🔗 वीडियो लिंक कॉपी हो गया।"
+            );
+
+          }
+
+        } catch (error) {
+
+          if (
+            !error ||
+            error.name !== "AbortError"
+          ) {
+
+            console.error(
+              "YouTube Long share error:",
+              error
+            );
+
+          }
+
+        }
+
+      }
+    );
+
+  }
+
+
+  /*
+   * =========================================
+   * LIKE
+   * =========================================
+   */
+
+  const likeBtn =
+    document.getElementById(
+      "youtubeLongLikeBtn"
+    );
+
+  if (likeBtn) {
+
+    likeBtn.addEventListener(
+      "click",
+      () => {
+
+        likeBtn.textContent =
+          "❤️ Liked";
+
+      }
+    );
+
+  }
+
+
+  /*
+   * =========================================
+   * SAVE
+   * =========================================
+   */
+
+  const saveBtn =
+    document.getElementById(
+      "youtubeLongSaveBtn"
+    );
+
+  if (saveBtn) {
+
+    saveBtn.addEventListener(
+      "click",
+      () => {
+
+        saveBtn.textContent =
+          "🔖 Saved";
+
+      }
+    );
+
+  }
+
+
+  /*
+   * =========================================
+   * REPORT
+   * =========================================
+   */
+
+  const reportBtn =
+    document.getElementById(
+      "youtubeLongReportBtn"
+    );
+
+  if (reportBtn) {
+
+    reportBtn.addEventListener(
+      "click",
+      async () => {
+
+        if (
+          typeof reportVideo ===
+          "function"
+        ) {
+
+          await reportVideo(
+            video
+          );
+
+        }
+
+      }
+    );
+
+  }
+
+
+  window.scrollTo({
+    top: 0,
+    behavior: "smooth"
+  });
+
+}
+
 function openPeerTubeWatchingPage(video) {
 
   const oldPage =
@@ -3145,6 +5420,7 @@ function openPeerTubeWatchingPage(video) {
             display:block;
           "
           allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+          referrerpolicy="strict-origin-when-cross-origin"
           allowfullscreen>
         </iframe>
 
@@ -3668,6 +5944,7 @@ function openOdyseeWatchingPage(video) {
             display:block;
           "
           allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+          referrerpolicy="strict-origin-when-cross-origin"
           allowfullscreen>
         </iframe>
 
@@ -6356,6 +8633,13 @@ window.videoApnaSelectedSound = null;
   let shortsCategoryFinished = {};
 
   /*
+   * YouTube की हर search category का अगला page याद रखें।
+   * इससे वही पहले 50 videos बार-बार नहीं आएँगे।
+   */
+  let youtubePageTokens = {};
+  let youtubeCategoryFinished = {};
+
+  /*
    * पहला Short muted रहेगा।
    * User एक बार Sound ON करेगा तो preference आगे रहेगी।
    */
@@ -6497,6 +8781,12 @@ window.videoApnaSelectedSound = null;
       shortsCategoryStarts = {};
       shortsCategoryFinished = {};
 
+      /*
+       * नया Shorts session = YouTube pagination भी reset।
+       */
+      youtubePageTokens = {};
+      youtubeCategoryFinished = {};
+
       shortsSoundEnabled = true;
       shortsSoundUnlocked = true;
 
@@ -6525,23 +8815,12 @@ window.videoApnaSelectedSound = null;
 
           const ownShorts = ownData.filter(function (video) {
 
-            const visibility =
-              String(video.visibility || "public").toLowerCase();
-
             const duration =
               Number(video.duration || 0);
 
-            const playable =
-              Boolean(
-                video.embedUrl ||
-                video.vcdnPlaybackUrl ||
-                video.url ||
-                video.localUrl
-              );
-
             return (
-              visibility !== "private" &&
-              playable
+              duration > 0 &&
+              duration <= 90
             );
           });
 
@@ -6614,6 +8893,216 @@ window.videoApnaSelectedSound = null;
        * अपने videos की duration पर कोई सीमा नहीं है।
        * इसके बाद Odysee और PeerTube fallback के रूप में आएँगे।
        */
+
+      /*
+       * ----------------------------------------------------------
+       * SOURCE 2: YOUTUBE
+       * ----------------------------------------------------------
+       *
+       * केवल API द्वारा embeddable videos।
+       * YouTube API route पहले ही embeddable status check करता है।
+       */
+      if (shortsVideos.length < batchTarget) {
+
+        let youtubeAdded = 0;
+
+        for (let i = 0; i < shortsQueries.length; i++) {
+
+          const index =
+            (shortsQueryIndex + i) % shortsQueries.length;
+
+          const selectedQuery =
+            shortsQueries[index];
+
+          /*
+           * जिस YouTube category का पूरा pagination खत्म हो चुका है,
+           * उसे दोबारा request नहीं करना है।
+           */
+          if (youtubeCategoryFinished[selectedQuery]) {
+            continue;
+          }
+
+          /*
+           * अगली batch में अगली category से शुरुआत होगी।
+           */
+          shortsQueryIndex =
+            (index + 1) % shortsQueries.length;
+
+          console.log(
+            "🎬 YouTube Shorts:",
+            selectedQuery
+          );
+
+          try {
+
+            const youtubePageToken =
+              String(
+                youtubePageTokens[selectedQuery] || ""
+              ).trim();
+
+            const youtubeUrl =
+              "/api/youtube-search?q=" +
+              encodeURIComponent(selectedQuery) +
+              (
+                youtubePageToken
+                  ? "&pageToken=" +
+                    encodeURIComponent(youtubePageToken)
+                  : ""
+              );
+
+            console.log(
+              "📄 YouTube page:",
+              selectedQuery,
+              youtubePageToken
+                ? "NEXT"
+                : "FIRST"
+            );
+
+            const response =
+              await fetch(youtubeUrl);
+
+            const data =
+              await response.json();
+
+            if (!response.ok || !data.success) {
+              console.warn(
+                "⚠️ YouTube search failed:",
+                data.message || response.status
+              );
+              continue;
+            }
+
+            /*
+             * अगली 50 videos के लिए YouTube का page token save करें।
+             */
+            const nextYouTubePageToken =
+              String(
+                data.nextPageToken || ""
+              ).trim();
+
+            if (nextYouTubePageToken) {
+              youtubePageTokens[selectedQuery] =
+                nextYouTubePageToken;
+            } else {
+              youtubeCategoryFinished[selectedQuery] =
+                true;
+            }
+
+            const videos =
+              Array.isArray(data.videos)
+                ? data.videos
+                : [];
+
+            const incoming =
+              videos.filter(function (video) {
+
+                return (
+                  video &&
+                  video.videoId
+                );
+
+              });
+
+            const existing = new Set(
+              shortsVideos.map(function (video) {
+                return String(
+                  video.youtubeVideoId ||
+                  video.videoId ||
+                  video.uuid ||
+                  video.id ||
+                  video.embedUrl ||
+                  video.url
+                );
+              })
+            );
+
+            const fresh = [];
+
+            incoming.forEach(function (video) {
+
+              const videoId =
+                String(video.videoId || "").trim();
+
+              if (!videoId) return;
+
+              const key =
+                "youtube:" + videoId;
+
+              if (!existing.has(key)) {
+
+                existing.add(key);
+
+                fresh.push({
+                  id: key,
+                  youtubeVideoId: videoId,
+                  videoId: videoId,
+
+                  title:
+                    video.title || "YouTube Short",
+
+                  description:
+                    video.description || "",
+
+                  channelTitle:
+                    video.channelTitle || "YouTube",
+
+                  thumbnail:
+                    video.thumbnail || "",
+
+                  embedUrl:
+                    "https://www.youtube.com/embed/" +
+                    encodeURIComponent(videoId),
+
+                  source: "youtube",
+                  sourceName: "YouTube"
+                });
+              }
+            });
+
+            const sortedFresh =
+              sortShortVideos(fresh);
+
+            shortsVideos.push(...sortedFresh);
+
+            youtubeAdded +=
+              sortedFresh.length;
+
+            console.log(
+              "🔎 YouTube Shorts:",
+              "results=",
+              videos.length,
+              "fresh=",
+              sortedFresh.length
+            );
+
+            if (sortedFresh.length) {
+
+              if (!shortsFeed) {
+                createShortsFeed();
+                renderShorts();
+              } else {
+                appendShortsItems(sortedFresh);
+              }
+            }
+
+            if (shortsVideos.length >= batchTarget) {
+              break;
+            }
+
+          } catch (youtubeError) {
+
+            console.error(
+              "YOUTUBE SHORTS ERROR:",
+              youtubeError.message
+            );
+          }
+        }
+
+        console.log(
+          "📊 YouTube added:",
+          youtubeAdded
+        );
+      }
 
       /*
        * ----------------------------------------------------------
@@ -6975,7 +9464,7 @@ window.videoApnaSelectedSound = null;
         console.log(
           "✅ Shorts loaded:",
           shortsVideos.length,
-          "VideoApna → Odysee → PeerTube"
+          "VideoApna → YouTube → Odysee → PeerTube"
         );
       }
 
@@ -7123,6 +9612,20 @@ window.videoApnaSelectedSound = null;
       item.className = "videoapna-short";
 
       item.dataset.index = index;
+
+      /*
+       * YouTube Short की पहचान DOM में भी रखें।
+       * Blocked YouTube video हटाते समय
+       * बिल्कुल सही Short remove होगा।
+       */
+      if (
+        String(video.source || "").toLowerCase() ===
+        "youtube" &&
+        video.youtubeVideoId
+      ) {
+        item.dataset.youtubeVideoId =
+          String(video.youtubeVideoId);
+      }
 
       /*
        * Player placeholder.
@@ -7870,6 +10373,83 @@ window.videoApnaSelectedSound = null;
      * EXTERNAL / ODYSEE SHORTS
      * ============================================================
      */
+
+    /*
+     * ============================================================
+     * YOUTUBE SHORTS
+     *
+     * केवल VideoApna के अंदर चलने वाला YouTube embed।
+     * "YouTube पर जाएँ" वाला fallback नहीं चाहिए।
+     *
+     * अगर YouTube embedded playback allow नहीं करता है,
+     * monitorYouTubeShort() error पकड़कर इस Short को feed से हटाएगा।
+     * ============================================================
+     */
+    if (
+      String(video.source || "").toLowerCase() === "youtube" &&
+      video.youtubeVideoId
+    ) {
+      const videoId =
+        String(video.youtubeVideoId).trim();
+
+      if (!videoId) {
+        return null;
+      }
+
+      const iframe =
+        document.createElement("iframe");
+
+      let src =
+        "https://www.youtube.com/embed/" +
+        encodeURIComponent(videoId);
+
+      src +=
+        "?autoplay=1" +
+        "&controls=1" +
+        "&playsinline=1" +
+        "&enablejsapi=1" +
+        "&origin=" +
+        encodeURIComponent(window.location.origin);
+
+      if (
+        !(
+          shortsSoundEnabled &&
+          shortsSoundUnlocked
+        )
+      ) {
+        src += "&mute=1";
+      }
+
+      iframe.src = src;
+
+      iframe.title =
+        video.title || "YouTube Short";
+
+      iframe.allow =
+        "autoplay; encrypted-media; picture-in-picture; fullscreen";
+
+      iframe.allowFullscreen = true;
+
+      iframe.setAttribute(
+        "playsinline",
+        ""
+      );
+
+      iframe.style.width = "100%";
+      iframe.style.height = "100%";
+      iframe.style.border = "0";
+      iframe.style.display = "block";
+      iframe.style.background = "#000";
+
+      console.log(
+        "▶️ VIDEOAPNA YOUTUBE EMBED:",
+        video.title || "",
+        videoId
+      );
+
+      return iframe;
+    }
+
     if (!video.embedUrl) {
       return null;
     }
@@ -7971,6 +10551,390 @@ window.videoApnaSelectedSound = null;
   }
 
 
+
+  /*
+   * ============================================================
+   * VIDEOAPNA YOUTUBE EMBED AUTO FILTER
+   * ============================================================
+   *
+   * अगर YouTube embedded player किसी Short को चलाने से मना
+   * करता है, तो वह Short VideoApna feed से अपने-आप हट जाएगा।
+   *
+   * User को YouTube पर redirect नहीं किया जाएगा।
+   * ============================================================
+   */
+
+  let videoApnaYouTubeApiPromise = null;
+
+  function ensureVideoApnaYouTubeAPI() {
+
+    if (window.YT && window.YT.Player) {
+      return Promise.resolve(window.YT);
+    }
+
+    if (videoApnaYouTubeApiPromise) {
+      return videoApnaYouTubeApiPromise;
+    }
+
+    videoApnaYouTubeApiPromise =
+      new Promise(function (resolve, reject) {
+
+        const oldReady =
+          window.onYouTubeIframeAPIReady;
+
+        window.onYouTubeIframeAPIReady =
+          function () {
+
+            if (typeof oldReady === "function") {
+              try {
+                oldReady();
+              } catch (e) {}
+            }
+
+            if (window.YT && window.YT.Player) {
+              resolve(window.YT);
+            } else {
+              reject(
+                new Error("YouTube IFrame API unavailable")
+              );
+            }
+          };
+
+        const script =
+          document.createElement("script");
+
+        script.src =
+          "https://www.youtube.com/iframe_api";
+
+        script.async = true;
+
+        script.onerror = function () {
+          reject(
+            new Error("YouTube IFrame API load failed")
+          );
+        };
+
+        document.head.appendChild(script);
+      });
+
+    return videoApnaYouTubeApiPromise;
+  }
+
+
+  function removeFailedYouTubeShort(
+    video,
+    videoIndex,
+    errorCode
+  ) {
+
+    const videoId =
+      String(
+        video &&
+        (
+          video.youtubeVideoId ||
+          video.videoId ||
+          ""
+        )
+      ).trim();
+
+    if (!videoId) {
+      console.warn(
+        "⚠️ Blocked YouTube Short की ID नहीं मिली।"
+      );
+      return;
+    }
+
+    console.warn(
+      "⛔ YouTube embedded video blocked:",
+      errorCode,
+      videoId,
+      video && video.title
+        ? video.title
+        : ""
+    );
+
+    /*
+     * ============================================================
+     * 1. shortsVideos से EXACT YouTube ID हटाएँ।
+     *
+     * Index fallback नहीं इस्तेमाल करेंगे।
+     * इससे दूसरे Short के हटने का खतरा नहीं रहेगा।
+     * ============================================================
+     */
+    const removeIndex =
+      shortsVideos.findIndex(function (item) {
+
+        if (
+          String(
+            item &&
+            item.source ||
+            ""
+          ).toLowerCase() !== "youtube"
+        ) {
+          return false;
+        }
+
+        const itemId =
+          String(
+            item &&
+            (
+              item.youtubeVideoId ||
+              item.videoId ||
+              ""
+            )
+          ).trim();
+
+        return itemId === videoId;
+      });
+
+    if (removeIndex >= 0) {
+
+      shortsVideos.splice(
+        removeIndex,
+        1
+      );
+
+      if (removeIndex < shortsIndex) {
+        shortsIndex--;
+      }
+
+      console.log(
+        "🗑️ YouTube Short automatically removed:",
+        videoId
+      );
+    }
+
+    /*
+     * ============================================================
+     * 2. DOM में भी EXACT YouTube ID वाला Short हटाएँ।
+     *
+     * data-youtube-video-id हमने DOM creation में जोड़ा है।
+     * ============================================================
+     */
+    if (shortsFeed) {
+
+      const selector =
+        '.videoapna-short[data-youtube-video-id="' +
+        CSS.escape(videoId) +
+        '"]';
+
+      const domItem =
+        shortsFeed.querySelector(selector);
+
+      if (domItem) {
+        domItem.remove();
+
+        console.log(
+          "🧹 Blocked YouTube DOM item removed:",
+          videoId
+        );
+      }
+    }
+
+    /*
+     * ============================================================
+     * 3. अगर blocked iframe अभी भी मौजूद हो तो उसे भी destroy करें।
+     * ============================================================
+     */
+    if (shortsFeed) {
+
+      const iframes =
+        Array.from(
+          shortsFeed.querySelectorAll(
+            "iframe"
+          )
+        );
+
+      iframes.forEach(function (iframe) {
+
+        try {
+
+          const src =
+            String(
+              iframe.getAttribute("src") ||
+              ""
+            );
+
+          if (
+            src.includes(
+              "youtube.com/embed/" +
+              videoId
+            )
+          ) {
+
+            iframe.src = "about:blank";
+            iframe.removeAttribute("src");
+            iframe.remove();
+
+          }
+
+        } catch (e) {}
+
+      });
+    }
+
+    /*
+     * ============================================================
+     * 4. अगला उपलब्ध Short चलाएँ।
+     * ============================================================
+     */
+    const remainingItems =
+      shortsFeed
+        ? Array.from(
+            shortsFeed.querySelectorAll(
+              ".videoapna-short"
+            )
+          )
+        : [];
+
+    if (!remainingItems.length) {
+      return;
+    }
+
+    shortsIndex =
+      Math.min(
+        Math.max(
+          shortsIndex,
+          0
+        ),
+        remainingItems.length - 1
+      );
+
+    setTimeout(function () {
+
+      if (!shortsFeed) return;
+
+      const nextItem =
+        remainingItems[shortsIndex];
+
+      if (nextItem) {
+
+        shortsFeed.scrollTo({
+          top: nextItem.offsetTop,
+          behavior: "auto"
+        });
+
+      }
+
+      playCurrentShort();
+
+    }, 150);
+  }
+
+
+  function monitorYouTubeShort(
+    iframe,
+    video,
+    videoIndex
+  ) {
+
+    if (!iframe || !video) {
+      return;
+    }
+
+    if (
+      String(video.source || "").toLowerCase() !==
+      "youtube"
+    ) {
+      return;
+    }
+
+    ensureVideoApnaYouTubeAPI()
+      .then(function (YT) {
+
+        if (
+          !YT ||
+          !YT.Player ||
+          !iframe ||
+          !iframe.isConnected
+        ) {
+          return;
+        }
+
+        try {
+
+          new YT.Player(
+            iframe,
+            {
+              events: {
+
+                onError: function (event) {
+
+                  const code =
+                    Number(
+                      event &&
+                      event.data
+                    );
+
+                  /*
+                   * YouTube IFrame Player errors:
+                   *
+                   * 2   = invalid parameter
+                   * 5   = HTML5 player error
+                   * 100 = video not found/private
+                   * 101 = owner does not allow embedded playback
+                   * 150 = owner does not allow embedded playback
+                   * 153 = request missing required client/origin
+                   */
+                  const blockedCodes = [
+                    2,
+                    5,
+                    100,
+                    101,
+                    150,
+                    153
+                  ];
+
+                  console.warn(
+                    "🎬 YouTube Player Error:",
+                    code,
+                    video.youtubeVideoId ||
+                    video.videoId ||
+                    ""
+                  );
+
+                  if (
+                    blockedCodes.includes(code)
+                  ) {
+
+                    removeFailedYouTubeShort(
+                      video,
+                      videoIndex,
+                      code
+                    );
+                  }
+                }
+
+              }
+            }
+          );
+
+        } catch (error) {
+
+          console.warn(
+            "⚠️ YouTube monitor error:",
+            error &&
+            error.message
+              ? error.message
+              : error
+          );
+        }
+
+      })
+      .catch(function (error) {
+
+        console.warn(
+          "⚠️ YouTube IFrame API load failed:",
+          error &&
+          error.message
+            ? error.message
+            : error
+        );
+
+      });
+  }
+
+
   async function playCurrentShort() {
 
     if (!shortsFeed) return;
@@ -8009,7 +10973,32 @@ window.videoApnaSelectedSound = null;
             player.removeAttribute("src");
             player.load();
           } else {
+            /*
+             * External / Odysee iframe:
+             * पहले playback/message stop करने की कोशिश,
+             * फिर blank करके पूरी तरह remove करें।
+             */
+            try {
+              if (player.contentWindow) {
+                player.contentWindow.postMessage(
+                  JSON.stringify({
+                    event: "command",
+                    func: "stopVideo",
+                    args: []
+                  }),
+                  "*"
+                );
+              }
+            } catch (e) {}
+
             player.src = "about:blank";
+            player.removeAttribute("src");
+
+            try {
+              player.contentWindow &&
+                player.contentWindow.location &&
+                player.contentWindow.location.replace("about:blank");
+            } catch (e) {}
           }
 
         } catch (e) {}
@@ -8063,6 +11052,21 @@ window.videoApnaSelectedSound = null;
     playerBox.innerHTML = "";
 
     playerBox.appendChild(iframe);
+
+    /*
+     * YouTube embedded playback monitor
+     * Failed/blocked YouTube Short automatically remove होगा।
+     */
+    if (
+      String(video.source || "").toLowerCase() ===
+      "youtube"
+    ) {
+      monitorYouTubeShort(
+        iframe,
+        video,
+        shortsIndex
+      );
+    }
 
     console.log(
       shortsSoundEnabled
@@ -10240,19 +13244,21 @@ document.addEventListener(
       );
 
       if (status) {
-
-        if (
-          error &&
-          error.name === "NotAllowedError"
-        ) {
-          status.textContent =
-            "❌ Camera/Mic permission नहीं मिली। Android permission Allow करें।";
-        } else {
-          status.textContent =
-            "❌ Camera शुरू नहीं हो पाया: " +
-            (error.message || error.name || "Unknown error");
-        }
+        status.textContent =
+          "❌ Camera/Mic Error: " +
+          (error?.name || "Unknown") +
+          " | " +
+          (error?.message || "No message");
       }
+
+      console.error(
+        "❌ COLLAB CAMERA EXACT ERROR:",
+        {
+          name: error?.name,
+          message: error?.message,
+          constraint: error?.constraint
+        }
+      );
     }
   };
 
@@ -11640,3 +14646,46 @@ document.addEventListener(
 
 
 })();
+
+
+/*
+ * ============================================================
+ * VIDEOAPNA YOUTUBE LONG WATCH BACK
+ * ============================================================
+ */
+if (!window.__videoapnaYouTubeBackInstalled) {
+  window.__videoapnaYouTubeBackInstalled = true;
+
+  document.addEventListener(
+    "click",
+    function(event) {
+      const target =
+        event.target &&
+        event.target.closest
+          ? event.target.closest("#youtubeLongWatchBack")
+          : null;
+
+      if (!target) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+
+      const watchPage =
+        document.getElementById("watchingPage");
+
+      if (watchPage) {
+        watchPage.remove();
+      }
+
+      document.body.style.overflow = "";
+      document.documentElement.style.overflow = "";
+
+      window.scrollTo({
+        top: 0,
+        behavior: "smooth"
+      });
+    },
+    true
+  );
+}
