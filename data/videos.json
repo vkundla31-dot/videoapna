@@ -51,7 +51,8 @@
     "vcdnPlaybackUrl": "https://storage.vcdn.me/vcdn-hls/videos/2887b454-be48-4a19-b360-f499eb25dd4f/master.m3u8",
     "vcdnEmbedUrl": "https://embed.vcdn.me/embed/2887b454-be48-4a19-b360-f499eb25dd4f",
     "embedUrl": "https://embed.vcdn.me/embed/2887b454-be48-4a19-b360-f499eb25dd4f",
-    "posterUrl": "https://storage.vcdn.me/vcdn-hls/videos/2887b454-be48-4a19-b360-f499eb25dd4f/poster.jpg"
+    "posterUrl": "https://storage.vcdn.me/vcdn-hls/videos/2887b454-be48-4a19-b360-f499eb25dd4f/poster.jpg",
+    "duration": 14.21625
   },
   {
     "id": 1787763314406,
@@ -74,6 +75,7 @@
     "vcdnPlaybackUrl": "https://storage.vcdn.me/vcdn-hls/videos/ec082201-97ac-4f95-be02-9433b4302812/master.m3u8",
     "vcdnEmbedUrl": "https://embed.vcdn.me/embed/ec082201-97ac-4f95-be02-9433b4302812",
     "embedUrl": "https://embed.vcdn.me/embed/ec082201-97ac-4f95-be02-9433b4302812",
-    "posterUrl": "https://storage.vcdn.me/vcdn-hls/videos/ec082201-97ac-4f95-be02-9433b4302812/poster.jpg"
+    "posterUrl": "https://storage.vcdn.me/vcdn-hls/videos/ec082201-97ac-4f95-be02-9433b4302812/poster.jpg",
+    "duration": 8.870023
   }
 ]

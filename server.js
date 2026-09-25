@@ -258,8 +258,453 @@ const DATA = path.join(ROOT, "data");
 const DB = path.join(DATA, "videos.json");
 const SOUNDS_DB = path.join(DATA, "sounds.json");
 
+/*
+ * ============================================================
+ * VIDEOAPNA YOUTUBE SHORTS SHARED CACHE + QUOTA STATE
+ * ------------------------------------------------------------
+ * Shorts YouTube Search API only.
+ * Long Video system is completely separate.
+ * ============================================================
+ */
+
+const YOUTUBE_SHORTS_CACHE_FILE =
+  path.join(DATA, "youtube-shorts-cache.json");
+
+const YOUTUBE_SHORTS_MAX_CALLS = 40;
+const YOUTUBE_SHORTS_AUTO_MAX_CALLS = 30;
+const YOUTUBE_SHORTS_PUBLIC_MAX_CALLS = 10;
+
+let youtubeShortsState = {
+  windowStartedAt: Date.now(),
+  totalCalls: 0,
+  automaticCalls: 0,
+  publicCalls: 0,
+  cache: {}
+};
+
+if (fs.existsSync(YOUTUBE_SHORTS_CACHE_FILE)) {
+  try {
+    const savedShortsState =
+      JSON.parse(
+        fs.readFileSync(
+          YOUTUBE_SHORTS_CACHE_FILE,
+          "utf8"
+        )
+      );
+
+    if (
+      savedShortsState &&
+      typeof savedShortsState === "object"
+    ) {
+      youtubeShortsState = {
+        ...youtubeShortsState,
+        ...savedShortsState
+      };
+    }
+  } catch (error) {
+    console.error(
+      "YOUTUBE SHORTS STATE LOAD ERROR:",
+      error.message
+    );
+  }
+}
+
+function saveYouTubeShortsState() {
+  try {
+    fs.writeFileSync(
+      YOUTUBE_SHORTS_CACHE_FILE,
+      JSON.stringify(
+        youtubeShortsState,
+        null,
+        2
+      )
+    );
+  } catch (error) {
+    console.error(
+      "YOUTUBE SHORTS STATE SAVE ERROR:",
+      error.message
+    );
+  }
+}
+
 fs.mkdirSync(UPLOADS, { recursive: true });
 fs.mkdirSync(DATA, { recursive: true });
+
+saveYouTubeShortsState();
+
+
+
+function getYouTubeShortsCacheKey(
+  query,
+  pageToken
+) {
+  return JSON.stringify({
+    q: String(query || "")
+      .trim()
+      .toLowerCase(),
+    pageToken: String(pageToken || "").trim()
+  });
+}
+
+function getYouTubeShortsCachedResult(
+  query,
+  pageToken
+) {
+  resetYouTubeShortsWindowIfNeeded();
+
+  const key =
+    getYouTubeShortsCacheKey(
+      query,
+      pageToken
+    );
+
+  const cached =
+    youtubeShortsState.cache &&
+    youtubeShortsState.cache[key];
+
+  if (
+    !cached ||
+    typeof cached !== "object"
+  ) {
+    return null;
+  }
+
+  return {
+    videos:
+      Array.isArray(cached.videos)
+        ? cached.videos
+        : [],
+    nextPageToken:
+      String(
+        cached.nextPageToken || ""
+      ).trim(),
+    cachedAt:
+      Number(cached.cachedAt || 0)
+  };
+}
+
+function saveYouTubeShortsCachedResult(
+  query,
+  pageToken,
+  videos,
+  nextPageToken
+) {
+  const key =
+    getYouTubeShortsCacheKey(
+      query,
+      pageToken
+    );
+
+  if (
+    !youtubeShortsState.cache ||
+    typeof youtubeShortsState.cache !== "object"
+  ) {
+    youtubeShortsState.cache = {};
+  }
+
+  youtubeShortsState.cache[key] = {
+    videos:
+      Array.isArray(videos)
+        ? videos
+        : [],
+    nextPageToken:
+      String(
+        nextPageToken || ""
+      ).trim(),
+    cachedAt: Date.now()
+  };
+
+  saveYouTubeShortsState();
+}
+
+function resetYouTubeShortsWindowIfNeeded() {
+  const now = Date.now();
+  const windowStartedAt =
+    Number(youtubeShortsState.windowStartedAt || 0);
+
+  const windowAge =
+    now - windowStartedAt;
+
+  if (
+    !windowStartedAt ||
+    windowAge >= 24 * 60 * 60 * 1000
+  ) {
+    youtubeShortsState = {
+      windowStartedAt: now,
+      totalCalls: 0,
+      automaticCalls: 0,
+      publicCalls: 0,
+      cache:
+        youtubeShortsState &&
+        youtubeShortsState.cache &&
+        typeof youtubeShortsState.cache === "object"
+          ? youtubeShortsState.cache
+          : {}
+    };
+
+    saveYouTubeShortsState();
+
+    console.log(
+      "YouTube Shorts quota window RESET"
+    );
+  }
+}
+
+function reserveYouTubeShortsApiCall(type) {
+  resetYouTubeShortsWindowIfNeeded();
+
+  const mode =
+    type === "public"
+      ? "public"
+      : "automatic";
+
+  if (
+    youtubeShortsState.totalCalls >=
+    YOUTUBE_SHORTS_MAX_CALLS
+  ) {
+    console.log(
+      "YouTube API BLOCKED — DAILY LIMIT REACHED"
+    );
+
+    return {
+      allowed: false,
+      reason: "total_limit"
+    };
+  }
+
+  if (
+    mode === "automatic" &&
+    youtubeShortsState.automaticCalls >=
+      YOUTUBE_SHORTS_AUTO_MAX_CALLS
+  ) {
+    console.log(
+      "YouTube API BLOCKED — AUTOMATIC SHORTS LIMIT REACHED"
+    );
+
+    return {
+      allowed: false,
+      reason: "automatic_limit"
+    };
+  }
+
+  if (
+    mode === "public" &&
+    youtubeShortsState.publicCalls >=
+      YOUTUBE_SHORTS_PUBLIC_MAX_CALLS
+  ) {
+    console.log(
+      "YouTube API BLOCKED — PUBLIC SHORTS LIMIT REACHED"
+    );
+
+    return {
+      allowed: false,
+      reason: "public_limit"
+    };
+  }
+
+  youtubeShortsState.totalCalls += 1;
+
+  if (mode === "automatic") {
+    youtubeShortsState.automaticCalls += 1;
+  } else {
+    youtubeShortsState.publicCalls += 1;
+  }
+
+  const callNumber =
+    youtubeShortsState.totalCalls;
+
+  saveYouTubeShortsState();
+
+  console.log(
+    "YouTube API CALL #" +
+      callNumber +
+      "| TYPE:" +
+      mode
+  );
+
+  return {
+    allowed: true,
+    callNumber,
+    type: mode
+  };
+}
+
+/*
+ * ============================================================
+ * VIDEOAPNA YOUTUBE LONG VIDEO SHARED QUOTA STATE
+ * ------------------------------------------------------------
+ * Long YouTube Search API only.
+ * Shorts quota/state completely separate.
+ * ============================================================
+ */
+
+const YOUTUBE_LONG_QUOTA_FILE =
+  path.join(DATA, "youtube-long-quota.json");
+
+const YOUTUBE_LONG_MAX_CALLS = 60;
+const YOUTUBE_LONG_AUTO_MAX_CALLS = 35;
+const YOUTUBE_LONG_PUBLIC_MAX_CALLS = 25;
+
+let youtubeLongQuotaState = {
+  windowStartedAt: Date.now(),
+  totalCalls: 0,
+  automaticCalls: 0,
+  publicCalls: 0
+};
+
+if (fs.existsSync(YOUTUBE_LONG_QUOTA_FILE)) {
+  try {
+    const savedLongQuotaState =
+      JSON.parse(
+        fs.readFileSync(
+          YOUTUBE_LONG_QUOTA_FILE,
+          "utf8"
+        )
+      );
+
+    if (
+      savedLongQuotaState &&
+      typeof savedLongQuotaState === "object"
+    ) {
+      youtubeLongQuotaState = {
+        ...youtubeLongQuotaState,
+        ...savedLongQuotaState
+      };
+    }
+  } catch (error) {
+    console.error(
+      "YOUTUBE LONG QUOTA STATE LOAD ERROR:",
+      error.message
+    );
+  }
+}
+
+function saveYouTubeLongQuotaState() {
+  try {
+    fs.writeFileSync(
+      YOUTUBE_LONG_QUOTA_FILE,
+      JSON.stringify(
+        youtubeLongQuotaState,
+        null,
+        2
+      )
+    );
+  } catch (error) {
+    console.error(
+      "YOUTUBE LONG QUOTA STATE SAVE ERROR:",
+      error.message
+    );
+  }
+}
+
+function resetYouTubeLongQuotaWindowIfNeeded() {
+  const now = Date.now();
+
+  const windowStartedAt =
+    Number(
+      youtubeLongQuotaState.windowStartedAt || 0
+    );
+
+  const windowAge =
+    now - windowStartedAt;
+
+  if (
+    !windowStartedAt ||
+    windowAge >= 24 * 60 * 60 * 1000
+  ) {
+    youtubeLongQuotaState = {
+      windowStartedAt: now,
+      totalCalls: 0,
+      automaticCalls: 0,
+      publicCalls: 0
+    };
+
+    saveYouTubeLongQuotaState();
+
+    console.log(
+      "YouTube Long quota window RESET"
+    );
+  }
+}
+
+function reserveYouTubeLongApiCall(type) {
+  resetYouTubeLongQuotaWindowIfNeeded();
+
+  const mode =
+    type === "public"
+      ? "public"
+      : "automatic";
+
+  if (
+    youtubeLongQuotaState.totalCalls >=
+    YOUTUBE_LONG_MAX_CALLS
+  ) {
+    console.log(
+      "YouTube Long API BLOCKED — DAILY TOTAL LIMIT REACHED"
+    );
+
+    return {
+      allowed: false,
+      reason: "total_limit"
+    };
+  }
+
+  if (
+    mode === "automatic" &&
+    youtubeLongQuotaState.automaticCalls >=
+      YOUTUBE_LONG_AUTO_MAX_CALLS
+  ) {
+    console.log(
+      "YouTube Long API BLOCKED — AUTOMATIC LIMIT REACHED"
+    );
+
+    return {
+      allowed: false,
+      reason: "automatic_limit"
+    };
+  }
+
+  if (
+    mode === "public" &&
+    youtubeLongQuotaState.publicCalls >=
+      YOUTUBE_LONG_PUBLIC_MAX_CALLS
+  ) {
+    console.log(
+      "YouTube Long API BLOCKED — PUBLIC LIMIT REACHED"
+    );
+
+    return {
+      allowed: false,
+      reason: "public_limit"
+    };
+  }
+
+  youtubeLongQuotaState.totalCalls += 1;
+
+  if (mode === "automatic") {
+    youtubeLongQuotaState.automaticCalls += 1;
+  } else {
+    youtubeLongQuotaState.publicCalls += 1;
+  }
+
+  const callNumber =
+    youtubeLongQuotaState.totalCalls;
+
+  saveYouTubeLongQuotaState();
+
+  console.log(
+    "YouTube LONG API CALL #" +
+      callNumber +
+      "| TYPE:" +
+      mode
+  );
+
+  return {
+    allowed: true,
+    callNumber,
+    type: mode
+  };
+}
 
 if (!fs.existsSync(DB)) {
   fs.writeFileSync(DB, "[]");
@@ -5501,10 +5946,97 @@ app.get("/api/youtube-search", (req, res) => {
 
     const https = require("https");
 
-    // पहले Search API से वीडियो IDs निकालें
+    /*
+     * ----------------------------------------------------------
+     * VIDEOAPNA SHORTS SHARED CACHE + QUOTA
+     * ----------------------------------------------------------
+     *
+     * This route is currently used by the automatic Shorts feed.
+     *
+     * Cache hit:
+     *   - ZERO YouTube Search API calls
+     *
+     * Cache miss:
+     *   - reserve one automatic Shorts Search API call
+     *
+     * IMPORTANT:
+     *   YouTube videos/status API call is NOT counted here.
+     *   The 40-call limit is specifically for Search API calls.
+     * ----------------------------------------------------------
+     */
+
+    const source =
+      String(req.query.source || "shorts")
+        .trim()
+        .toLowerCase();
+
+    const quotaType =
+      source === "public"
+        ? "public"
+        : "automatic";
+
     const pageToken =
       String(req.query.pageToken || "").trim();
 
+    /*
+     * Cache is checked BEFORE quota reservation.
+     * Therefore cached results never consume a new API call.
+     */
+    const cached =
+      getYouTubeShortsCachedResult(
+        query,
+        pageToken
+      );
+
+    if (cached) {
+      console.log(
+        "YOUTUBE SHORTS CACHE HIT:",
+        query,
+        pageToken ? "NEXT" : "FIRST"
+      );
+
+      return res.json({
+        success: true,
+        cached: true,
+        nextPageToken:
+          cached.nextPageToken || "",
+        videos:
+          Array.isArray(cached.videos)
+            ? cached.videos
+            : []
+      });
+    }
+
+    /*
+     * Cache miss -> reserve exactly ONE YouTube Search API call.
+     * If the shared quota is exhausted, NO YouTube Search API
+     * request is made.
+     */
+    const reservation =
+      reserveYouTubeShortsApiCall(
+        quotaType
+      );
+
+    if (!reservation.allowed) {
+      console.log(
+        "YOUTUBE SEARCH BLOCKED:",
+        query,
+        "| reason:",
+        reservation.reason,
+        "| type:",
+        quotaType
+      );
+
+      return res.json({
+        success: true,
+        quotaBlocked: true,
+        quotaReason: reservation.reason,
+        nextPageToken: "",
+        videos: []
+      });
+    }
+
+    // पहले Search API से वीडियो IDs निकालें
     const searchUrl =
       "https://www.googleapis.com/youtube/v3/search" +
       "?part=snippet" +
@@ -5530,40 +6062,75 @@ app.get("/api/youtube-search", (req, res) => {
           const json = JSON.parse(data);
 
           if (json.error) {
-            console.error("YOUTUBE SEARCH API ERROR:", json.error);
+            console.error(
+              "YOUTUBE SEARCH API ERROR:",
+              json.error
+            );
 
             return res.status(502).json({
               success: false,
-              message: json.error.message || "YouTube API error"
+              message:
+                json.error.message ||
+                "YouTube API error"
             });
           }
 
           const items = json.items || [];
 
           if (!items.length) {
+            saveYouTubeShortsCachedResult(
+              query,
+              pageToken,
+              [],
+              ""
+            );
+
             return res.json({
               success: true,
+              cached: false,
+              nextPageToken: "",
               videos: []
             });
           }
 
           const ids = items
-            .map(item => item.id && item.id.videoId)
+            .map(item =>
+              item.id &&
+              item.id.videoId
+            )
             .filter(Boolean);
 
           if (!ids.length) {
+            saveYouTubeShortsCachedResult(
+              query,
+              pageToken,
+              [],
+              json.nextPageToken || ""
+            );
+
             return res.json({
               success: true,
+              cached: false,
+              nextPageToken:
+                json.nextPageToken || "",
               videos: []
             });
           }
 
-          // अब केवल embeddable videos चेक करें
+          /*
+           * अब केवल embeddable videos चेक करें।
+           *
+           * IMPORTANT:
+           * यह Videos API call Shorts Search quota counter
+           * में नहीं गिनी जाती।
+           */
           const statusUrl =
             "https://www.googleapis.com/youtube/v3/videos" +
             "?part=status" +
-            "&id=" + encodeURIComponent(ids.join(",")) +
-            "&key=" + encodeURIComponent(key);
+            "&id=" +
+            encodeURIComponent(ids.join(",")) +
+            "&key=" +
+            encodeURIComponent(key);
 
           https.get(statusUrl, statusRes => {
             let statusData = "";
@@ -5574,7 +6141,8 @@ app.get("/api/youtube-search", (req, res) => {
 
             statusRes.on("end", async () => {
               try {
-                const statusJson = JSON.parse(statusData);
+                const statusJson =
+                  JSON.parse(statusData);
 
                 if (statusJson.error) {
                   console.error(
@@ -5590,41 +6158,58 @@ app.get("/api/youtube-search", (req, res) => {
                   });
                 }
 
-                const embeddableIds = new Set(
-                  (statusJson.items || [])
-                    .filter(item =>
-                      item.status &&
-                      item.status.embeddable === true
-                    )
-                    .map(item => item.id)
-                );
+                const embeddableIds =
+                  new Set(
+                    (statusJson.items || [])
+                      .filter(item =>
+                        item.status &&
+                        item.status.embeddable === true
+                      )
+                      .map(item => item.id)
+                  );
 
-                let videos = items
-                  .filter(item =>
-                    item.id &&
-                    item.id.videoId &&
-                    embeddableIds.has(item.id.videoId)
-                  )
-                  .map(item => ({
-                    videoId: item.id.videoId,
-                    title: item.snippet.title,
-                    description: item.snippet.description,
-                    channelTitle: item.snippet.channelTitle,
-                    thumbnail:
-                      item.snippet.thumbnails?.high?.url ||
-                      item.snippet.thumbnails?.medium?.url ||
-                      item.snippet.thumbnails?.default?.url
-                  }));
+                const videos =
+                  items
+                    .filter(item =>
+                      item.id &&
+                      item.id.videoId &&
+                      embeddableIds.has(
+                        item.id.videoId
+                      )
+                    )
+                    .map(item => ({
+                      videoId:
+                        item.id.videoId,
+
+                      title:
+                        item.snippet.title,
+
+                      description:
+                        item.snippet.description,
+
+                      channelTitle:
+                        item.snippet.channelTitle,
+
+                      thumbnail:
+                        item.snippet.thumbnails?.high?.url ||
+                        item.snippet.thumbnails?.medium?.url ||
+                        item.snippet.thumbnails?.default?.url
+                    }));
+
+                const nextPageToken =
+                  json.nextPageToken || "";
 
                 /*
-                 * Scalable production mode:
-                 * YouTube API के embeddable + syndicated filters
-                 * ही primary server-side filters हैं।
-                 *
-                 * Puppeteer को हर candidate पर चलाना production
-                 * feed के लिए disabled है क्योंकि इससे latency,
-                 * false rejection और Render load बहुत बढ़ता है।
+                 * Save the FINAL filtered result.
+                 * Therefore future requests can use the cache
+                 * without calling either Search or Videos API.
                  */
+                saveYouTubeShortsCachedResult(
+                  query,
+                  pageToken,
+                  videos,
+                  nextPageToken
+                );
 
                 console.log(
                   "YOUTUBE SEARCH:",
@@ -5633,13 +6218,17 @@ app.get("/api/youtube-search", (req, res) => {
                   items.length,
                   "| Embeddable:",
                   videos.length,
-                  "| Puppeteer: OFF"
+                  "| Type:",
+                  quotaType,
+                  "| API Call #:",
+                  reservation.callNumber,
+                  "| Cached: YES"
                 );
 
-                res.json({
+                return res.json({
                   success: true,
-                  nextPageToken:
-                    json.nextPageToken || "",
+                  cached: false,
+                  nextPageToken,
                   videos
                 });
 
@@ -5651,7 +6240,8 @@ app.get("/api/youtube-search", (req, res) => {
 
                 res.status(502).json({
                   success: false,
-                  message: "YouTube status response समझ नहीं आया।"
+                  message:
+                    "YouTube status response समझ नहीं आया।"
                 });
               }
             });
@@ -5664,7 +6254,8 @@ app.get("/api/youtube-search", (req, res) => {
 
             res.status(502).json({
               success: false,
-              message: "YouTube status request failed।"
+              message:
+                "YouTube status request failed।"
             });
           });
 
@@ -5676,7 +6267,8 @@ app.get("/api/youtube-search", (req, res) => {
 
           res.status(502).json({
             success: false,
-            message: "YouTube response समझ नहीं आया।"
+            message:
+              "YouTube response समझ नहीं आया।"
           });
         }
       });
@@ -5689,16 +6281,21 @@ app.get("/api/youtube-search", (req, res) => {
 
       res.status(502).json({
         success: false,
-        message: "YouTube search request failed।"
+        message:
+          "YouTube search request failed।"
       });
     });
 
   } catch (error) {
-    console.error("YOUTUBE SEARCH SERVER ERROR:", error);
+    console.error(
+      "YOUTUBE SEARCH SERVER ERROR:",
+      error
+    );
 
     res.status(500).json({
       success: false,
-      message: "YouTube search में server error आया।"
+      message:
+        "YouTube search में server error आया।"
     });
   }
 });
@@ -5727,7 +6324,7 @@ const YOUTUBE_LONG_CACHE_FILE =
   );
 
 const YOUTUBE_LONG_CACHE_TTL_MS =
-  24 * 60 * 60 * 1000;
+  30 * 24 * 60 * 60 * 1000;
 
 let youtubeLongServerCache = {};
 
@@ -6324,6 +6921,11 @@ app.get("/api/youtube-long-search", (req, res) => {
       req.query.pageToken || ""
     ).trim();
 
+    const youtubeLongSource =
+      String(req.query.source || "").trim().toLowerCase() === "public"
+        ? "public"
+        : "automatic";
+
     // ==========================================================
     // SERVER CACHE FIRST
     // Same query + same pageToken होने पर
@@ -6488,9 +7090,40 @@ app.get("/api/youtube-long-search", (req, res) => {
       "| page:",
       pageToken
         ? "NEXT"
-        : "FIRST"
+        : "FIRST",
+      "| source:",
+      youtubeLongSource
     );
 
+    // ==========================================================
+    // LONG YOUTUBE DAILY QUOTA
+    // Cache miss होने पर ही quota consume होगा।
+    // ==========================================================
+
+    const quota =
+      reserveYouTubeLongApiCall(
+        youtubeLongSource
+      );
+
+    if (!quota.allowed) {
+
+      console.log(
+        "⛔ YOUTUBE LONG QUOTA BLOCKED:",
+        query,
+        "| source:",
+        youtubeLongSource,
+        "| reason:",
+        quota.reason
+      );
+
+      return res.json({
+        success: true,
+        quotaBlocked: true,
+        quotaReason: quota.reason,
+        nextPageToken: "",
+        videos: []
+      });
+    }
 
     const searchUrl =
       "https://www.googleapis.com/youtube/v3/search" +

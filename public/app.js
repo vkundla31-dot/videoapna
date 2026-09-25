@@ -1005,9 +1005,16 @@ async function loadOneLongYouTubePage() {
         ] || ""
       ).trim();
 
+    const youtubeLongSource =
+      longFeedIsSearch
+        ? "public"
+        : "automatic";
+
     let apiPath =
       "/api/youtube-long-search?q=" +
-      encodeURIComponent(query);
+      encodeURIComponent(query) +
+      "&source=" +
+      encodeURIComponent(youtubeLongSource);
 
     if (pageToken) {
 
@@ -9418,6 +9425,7 @@ window.videoApnaSelectedSound = null;
             const youtubeUrl =
               "/api/youtube-search?q=" +
               encodeURIComponent(selectedQuery) +
+              "&source=shorts" +
               (
                 youtubePageToken
                   ? "&pageToken=" +
@@ -10037,15 +10045,13 @@ window.videoApnaSelectedSound = null;
     document.body.classList.add("shorts-mode");
 
     /*
-     * VideoApna के अपने Shorts autoplay नहीं होंगे।
-     * Odysee / PeerTube का पहला Short पहले जैसा autoplay करेगा।
+     * Current Short autoplay करेगा।
+     * VideoApna / YouTube / Odysee / PeerTube का बाकी playback logic
+     * अलग से वही रहेगा।
      */
     const firstShort = shortsVideos[shortsIndex];
 
-    if (
-      firstShort &&
-      String(firstShort.source || "").toLowerCase() !== "videoapna"
-    ) {
+    if (firstShort) {
       setTimeout(function () {
         playCurrentShort();
       }, 500);
@@ -11577,22 +11583,115 @@ window.videoApnaSelectedSound = null;
 
     }
 
+    /*
+     * जिस Short के लिए player बन रहा है उसका index
+     * सुरक्षित रखें। createShortIframe() में await है,
+     * इसलिए इस दौरान user swipe कर सकता है।
+     */
+    const requestedIndex =
+      shortsIndex;
+
     const video =
-      shortsVideos[shortsIndex];
+      shortsVideos[requestedIndex];
 
     if (!video) return;
 
     /*
-     * नया iframe सिर्फ current Short के लिए।
+     * नया player सिर्फ इसी current Short के लिए।
      */
     const iframe =
       await createShortIframe(video);
 
     if (!iframe) return;
 
+    /*
+     * VCDN config fetch के दौरान अगर user दूसरे Short
+     * पर swipe कर चुका है तो पुराना player attach न करें।
+     */
+    if (shortsIndex !== requestedIndex) {
+
+      try {
+        if (iframe.tagName === "VIDEO") {
+          iframe.pause();
+          iframe.removeAttribute("src");
+          iframe.load();
+        } else {
+          iframe.src = "about:blank";
+          iframe.removeAttribute("src");
+        }
+      } catch (e) {}
+
+      return;
+    }
+
+    /*
+     * Current player box भी verify करें।
+     */
+    const latestItems =
+      Array.from(
+        shortsFeed.querySelectorAll(
+          ".videoapna-short"
+        )
+      );
+
+    if (
+      latestItems[requestedIndex] !== currentItem
+    ) {
+      try {
+        if (iframe.tagName === "VIDEO") {
+          iframe.pause();
+          iframe.removeAttribute("src");
+          iframe.load();
+        } else {
+          iframe.src = "about:blank";
+          iframe.removeAttribute("src");
+        }
+      } catch (e) {}
+
+      return;
+    }
+
     playerBox.innerHTML = "";
 
     playerBox.appendChild(iframe);
+
+    /*
+     * ============================================================
+     * VIDEOAPNA NATIVE VIDEO — PLAY AFTER DOM ATTACH
+     *
+     * Native <video> को DOM में जोड़ने के बाद play() करें।
+     * इससे browser autoplay/player lifecycle सही context में
+     * initialize होता है।
+     *
+     * केवल VideoApna source पर लागू।
+     * YouTube / PeerTube / Odysee untouched.
+     * ============================================================
+     */
+    if (
+      String(video.source || "").toLowerCase() === "videoapna" &&
+      iframe.tagName === "VIDEO"
+    ) {
+      try {
+        const playResult = iframe.play();
+
+        if (
+          playResult &&
+          typeof playResult.catch === "function"
+        ) {
+          playResult.catch(function (error) {
+            console.warn(
+              "⚠️ VideoApna native post-append play blocked:",
+              error
+            );
+          });
+        }
+      } catch (error) {
+        console.warn(
+          "⚠️ VideoApna native post-append play failed:",
+          error
+        );
+      }
+    }
 
     /*
      * YouTube embedded playback monitor

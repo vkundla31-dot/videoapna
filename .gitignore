@@ -57,3 +57,8 @@ data/youtube-long-cache.json
 
 # VideoApna generated YouTube Long playability cache
 data/youtube-long-playability-cache.json
+
+# VideoApna runtime YouTube quota/cache state
+data/youtube-shorts-cache.json
+data/youtube-long-quota.json
+data/youtube-long-failed.json
