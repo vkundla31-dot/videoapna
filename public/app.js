@@ -10017,6 +10017,8 @@ window.videoApnaSelectedSound = null;
         shortsFeed = null;
       }
 
+      backBtn.remove();
+
       shortsIndex = 0;
 
       window.scrollTo(0, 0);
