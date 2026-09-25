@@ -8726,6 +8726,7 @@ window.videoApnaSelectedSound = null;
     const photoInput = document.getElementById("profilePhotoInput");
     const photo = document.getElementById("profilePhoto");
     const avatarIcon = document.getElementById("profileAvatarIcon");
+    const photoButton = document.getElementById("profilePhotoButton");
     const saveBtn = document.getElementById("saveProfileBtn");
     const nameInput = document.getElementById("profileNameInput");
     const addressInput = document.getElementById("profileAddressInput");
@@ -8751,6 +8752,22 @@ window.videoApnaSelectedSound = null;
       }
     } catch (e) {
       console.warn("Profile load error:", e);
+    }
+
+    // "फोटो बदलें" बटन से Gallery/File Picker खोलें
+    if (photoButton && !photoButton.dataset.profileBound) {
+      photoButton.dataset.profileBound = "1";
+
+      photoButton.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        try {
+          photoInput.value = "";
+        } catch (e) {}
+
+        photoInput.click();
+      });
     }
 
     // फोटो चुनने पर तुरंत स्क्रीन पर दिखाएँ
