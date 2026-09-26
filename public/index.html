@@ -915,25 +915,12 @@
       🎬 वीडियो चुनें
     </button>
 
-    <input id="videoFile" type="file" accept="video/*" hidden onchange="
-  const f=this.files[0];
-  if(f){
-    const p=document.getElementById('previewPlayer');
-    const b=document.getElementById('videoPreview');
-    p.src=URL.createObjectURL(f);
-    b.classList.remove('hidden');
-    b.style.display = 'block';
-    b.style.visibility = 'visible';
-    b.style.opacity = '1';
-    p.style.display = 'block';
-    p.style.visibility = 'visible';
-    p.style.width = '100%';
-    p.style.height = '240px';
-    p.load();
-    alert('वीडियो चुना गया: ' + f.name);
-  }
-">
-    </label>
+    <input
+      id="videoFile"
+      type="file"
+      accept="video/*"
+      hidden
+    >
 
     <div id="videoPreview" class="upload-preview hidden">
       <video id="previewPlayer" controls playsinline></video>
