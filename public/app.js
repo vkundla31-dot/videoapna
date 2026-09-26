@@ -4289,12 +4289,21 @@ document.addEventListener("DOMContentLoaded", function () {
 (function () {
 
   const fileInput = document.getElementById("videoFile");
+  const selectButton = document.getElementById("videoSelectButton");
   const previewBox = document.getElementById("videoPreview");
   const player = document.getElementById("previewPlayer");
 
   if (!fileInput || !previewBox || !player) {
     console.log("Preview elements missing");
     return;
+  }
+
+  if (selectButton) {
+    selectButton.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      fileInput.click();
+    });
   }
 
   fileInput.addEventListener("change", function () {
@@ -6139,6 +6148,112 @@ window.videoApnaSelectedSound = null;
 })();
 
 
+
+/* =========================================================
+   VIDEOAPNA UPLOAD MODE CONTROLLER
+   Long Video / Photo Short
+   Isolated upload UI fix only
+========================================================= */
+(function () {
+
+  const longBtn =
+    document.getElementById("longVideoModeBtn");
+
+  const photoBtn =
+    document.getElementById("photoVideoModeBtn");
+
+  const photoMode =
+    document.getElementById("photoVideoMode");
+
+  const photoSelectButton =
+    document.getElementById("photoSelectButton");
+
+  const photoInput =
+    document.getElementById("photoVideoInput");
+
+  if (!longBtn || !photoBtn || !photoMode) {
+    console.log("UPLOAD MODE: ELEMENT MISSING");
+    return;
+  }
+
+  const uploadBox = photoMode.parentElement;
+
+  if (!uploadBox) {
+    console.log("UPLOAD MODE: UPLOAD BOX MISSING");
+    return;
+  }
+
+  const uploadHeader =
+    uploadBox.querySelector(".upload-header");
+
+  if (!uploadHeader) {
+    console.log("UPLOAD MODE: LONG VIDEO HEADER MISSING");
+    return;
+  }
+
+  function setLongVideoMode() {
+
+    longBtn.classList.add("active");
+    photoBtn.classList.remove("active");
+
+    photoMode.classList.add("hidden");
+
+    let node = uploadHeader;
+
+    while (node) {
+      if (node.nodeType === 1) {
+        node.style.display = "";
+      }
+      node = node.nextElementSibling;
+    }
+
+    console.log("UPLOAD MODE: LONG VIDEO");
+  }
+
+  function setPhotoVideoMode() {
+
+    photoBtn.classList.add("active");
+    longBtn.classList.remove("active");
+
+    photoMode.classList.remove("hidden");
+
+    let node = uploadHeader;
+
+    while (node) {
+      if (node.nodeType === 1) {
+        node.style.display = "none";
+      }
+      node = node.nextElementSibling;
+    }
+
+    console.log("UPLOAD MODE: PHOTO SHORT");
+  }
+
+  longBtn.addEventListener("click", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    setLongVideoMode();
+  });
+
+  photoBtn.addEventListener("click", function (event) {
+    event.preventDefault();
+    event.stopPropagation();
+    setPhotoVideoMode();
+  });
+
+  if (photoSelectButton && photoInput) {
+    photoSelectButton.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      photoInput.click();
+    });
+  }
+
+  setLongVideoMode();
+
+  console.log("VIDEOAPNA UPLOAD MODE CONTROLLER READY");
+
+})();
 
 /* =========================================================
    VIDEOAPNA PHOTO → AUTO VIDEO
