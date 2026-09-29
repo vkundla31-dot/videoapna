@@ -28,13 +28,30 @@ async function uploadVideoToVcdn(filePath, title = "VideoApna Video") {
 
   const fileName = path.basename(filePath);
 
-  // 1. Initialize chunked upload
+  /*
+   * VCDN authentication:
+   * Use X-API-Key consistently for init/chunk/complete/status.
+   */
+  const authHeaders = {
+    "X-API-Key": apiKey
+  };
+
+  /*
+   * 1. Initialize chunked upload
+   */
+  console.log(
+    "VCDN INIT:",
+    fileName,
+    "size:",
+    fileSize
+  );
+
   const initResponse = await fetch(
     "https://cdn.vcdn.me/api/v1/upload/init",
     {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${apiKey}`,
+        ...authHeaders,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -58,59 +75,98 @@ async function uploadVideoToVcdn(filePath, title = "VideoApna Video") {
   try {
     initData = JSON.parse(initText);
   } catch {
-    throw new Error("VCDN init returned invalid JSON");
+    throw new Error(
+      "VCDN init returned invalid JSON"
+    );
   }
 
-  const uploadId = initData.uploadId || initData.videoId;
+  const uploadId =
+    initData.uploadId ||
+    initData.videoId;
 
   if (!uploadId) {
-    throw new Error("VCDN init did not return uploadId");
+    throw new Error(
+      "VCDN init did not return uploadId"
+    );
   }
 
-  // 2. Upload file in 5 MiB chunks
-  const CHUNK_SIZE = 5 * 1024 * 1024;
+  console.log(
+    "VCDN INIT OK:",
+    uploadId
+  );
+
+  /*
+   * 2. Upload file in 5 MiB chunks
+   */
+  const CHUNK_SIZE = 512 * 1024;
+
   let offset = 0;
   let chunkIndex = 0;
 
-  const fileHandle = await fs.promises.open(filePath, "r");
+  const fileHandle =
+    await fs.promises.open(filePath, "r");
 
   try {
     while (offset < fileSize) {
-      const remaining = fileSize - offset;
-      const currentSize = Math.min(CHUNK_SIZE, remaining);
-      const buffer = Buffer.allocUnsafe(currentSize);
+      const remaining =
+        fileSize - offset;
+
+      const currentSize =
+        Math.min(
+          CHUNK_SIZE,
+          remaining
+        );
+
+      const buffer =
+        Buffer.allocUnsafe(currentSize);
 
       let totalRead = 0;
 
       while (totalRead < currentSize) {
-        const result = await fileHandle.read(
-          buffer,
-          totalRead,
-          currentSize - totalRead,
-          offset + totalRead
-        );
+        const result =
+          await fileHandle.read(
+            buffer,
+            totalRead,
+            currentSize - totalRead,
+            offset + totalRead
+          );
 
         if (!result.bytesRead) {
-          throw new Error("Unexpected end of file during VCDN upload");
+          throw new Error(
+            "Unexpected end of file during VCDN upload"
+          );
         }
 
         totalRead += result.bytesRead;
       }
 
-      const chunkResponse = await fetch(
-        `https://cdn.vcdn.me/api/v1/upload/${uploadId}/chunk`,
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/octet-stream",
-            "X-Chunk-Index": String(chunkIndex)
-          },
-          body: buffer
-        }
+      console.log(
+        "VCDN CHUNK:",
+        chunkIndex,
+        "offset:",
+        offset,
+        "size:",
+        currentSize
       );
 
-      const chunkText = await chunkResponse.text();
+      const chunkResponse =
+        await fetch(
+          `https://cdn.vcdn.me/api/v1/upload/${uploadId}/chunk`,
+          {
+            method: "POST",
+            headers: {
+              ...authHeaders,
+              "Content-Type":
+                "application/octet-stream",
+              "X-Chunk-Index":
+                String(chunkIndex)
+            },
+            body: buffer
+          }
+        );
+
+      const chunkText =
+        await chunkResponse.text();
 
       if (!chunkResponse.ok) {
         throw new Error(
@@ -120,27 +176,44 @@ async function uploadVideoToVcdn(filePath, title = "VideoApna Video") {
 
       offset += currentSize;
       chunkIndex += 1;
+
+      console.log(
+        "VCDN CHUNK OK:",
+        chunkIndex,
+        "/",
+        Math.ceil(fileSize / CHUNK_SIZE)
+      );
     }
   } finally {
     await fileHandle.close();
   }
 
-  // 3. Complete upload
-  const completeResponse = await fetch(
-    "https://cdn.vcdn.me/api/v1/upload/complete",
-    {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        uploadId
-      })
-    }
+  /*
+   * 3. Complete upload
+   */
+  console.log(
+    "VCDN COMPLETE:",
+    uploadId
   );
 
-  const completeText = await completeResponse.text();
+  const completeResponse =
+    await fetch(
+      "https://cdn.vcdn.me/api/v1/upload/complete",
+      {
+        method: "POST",
+        headers: {
+          ...authHeaders,
+          "Content-Type":
+            "application/json"
+        },
+        body: JSON.stringify({
+          uploadId
+        })
+      }
+    );
+
+  const completeText =
+    await completeResponse.text();
 
   if (!completeResponse.ok) {
     throw new Error(
@@ -151,30 +224,46 @@ async function uploadVideoToVcdn(filePath, title = "VideoApna Video") {
   let completeData;
 
   try {
-    completeData = JSON.parse(completeText);
+    completeData =
+      JSON.parse(completeText);
   } catch {
-    throw new Error("VCDN complete returned invalid JSON");
+    throw new Error(
+      "VCDN complete returned invalid JSON"
+    );
   }
 
-  // 4. Wait for VCDN transcoding/playback to become ready.
-  const vcdnVideoId = completeData.videoId || uploadId;
+  /*
+   * 4. Wait for VCDN transcoding/playback
+   */
+  const vcdnVideoId =
+    completeData.videoId ||
+    uploadId;
 
   let videoData = null;
 
-  for (let attempt = 0; attempt < 30; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const statusResponse = await fetch(
-      `https://cdn.vcdn.me/api/v1/videos/${vcdnVideoId}`,
-      {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`
-        }
-      }
+  for (
+    let attempt = 0;
+    attempt < 30;
+    attempt++
+  ) {
+    await new Promise(
+      resolve =>
+        setTimeout(resolve, 2000)
     );
 
-    const statusText = await statusResponse.text();
+    const statusResponse =
+      await fetch(
+        `https://cdn.vcdn.me/api/v1/videos/${vcdnVideoId}`,
+        {
+          method: "GET",
+          headers: {
+            ...authHeaders
+          }
+        }
+      );
+
+    const statusText =
+      await statusResponse.text();
 
     if (!statusResponse.ok) {
       throw new Error(
@@ -183,15 +272,20 @@ async function uploadVideoToVcdn(filePath, title = "VideoApna Video") {
     }
 
     try {
-      videoData = JSON.parse(statusText);
+      videoData =
+        JSON.parse(statusText);
     } catch {
-      throw new Error("VCDN status returned invalid JSON");
+      throw new Error(
+        "VCDN status returned invalid JSON"
+      );
     }
 
     console.log(
       "VCDN VIDEO STATUS:",
       videoData.status || "unknown",
-      videoData.transcode_progress ?? videoData.progress ?? ""
+      videoData.transcode_progress ??
+        videoData.progress ??
+        ""
     );
 
     if (
@@ -212,22 +306,28 @@ async function uploadVideoToVcdn(filePath, title = "VideoApna Video") {
   }
 
   if (!videoData) {
-    throw new Error("VCDN status response was empty");
+    throw new Error(
+      "VCDN status response was empty"
+    );
   }
 
   const playbackSource =
-    Array.isArray(videoData.playback_sources) &&
+    Array.isArray(
+      videoData.playback_sources
+    ) &&
     videoData.playback_sources.length > 0
       ? videoData.playback_sources[0]
       : null;
 
   const masterUrl =
-    (playbackSource && playbackSource.masterUrl) ||
+    (playbackSource &&
+      playbackSource.masterUrl) ||
     videoData.legacy_playback_url ||
     "";
 
   const embedUrl =
-    videoData.embed_url || "";
+    videoData.embed_url ||
+    "";
 
   if (!masterUrl && !embedUrl) {
     throw new Error(
@@ -237,13 +337,21 @@ async function uploadVideoToVcdn(filePath, title = "VideoApna Video") {
 
   return {
     vcdnVideoId,
-    vcdnUploadId: completeData.uploadId || uploadId,
-    vcdnStatus: videoData.status || completeData.status || "ready",
-    vcdnPlaybackUrl: masterUrl,
-    vcdnEmbedUrl: embedUrl,
+    vcdnUploadId:
+      completeData.uploadId ||
+      uploadId,
+    vcdnStatus:
+      videoData.status ||
+      completeData.status ||
+      "ready",
+    vcdnPlaybackUrl:
+      masterUrl,
+    vcdnEmbedUrl:
+      embedUrl,
     vcdnPosterUrl:
       videoData.poster_url ||
-      (playbackSource && playbackSource.posterUrl) ||
+      (playbackSource &&
+        playbackSource.posterUrl) ||
       ""
   };
 }
@@ -253,10 +361,29 @@ const PORT = process.env.PORT || 8080;
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, "public");
-const UPLOADS = path.join(ROOT, "uploads");
-const DATA = path.join(ROOT, "data");
+
+const STORAGE_ROOT =
+  process.env.VIDEOAPNA_STORAGE_ROOT ||
+  ROOT;
+
+const UPLOADS = path.join(STORAGE_ROOT, "uploads");
+const DATA = path.join(STORAGE_ROOT, "data");
 const DB = path.join(DATA, "videos.json");
 const SOUNDS_DB = path.join(DATA, "sounds.json");
+
+// ============================================================
+// VIDEOAPNA CHANNEL + THUMBNAIL BACKEND
+// ============================================================
+const CHANNELS_DB = path.join(DATA, "channels.json");
+const THUMBNAILS_DIR = path.join(UPLOADS, "thumbnails");
+const CHANNEL_MEDIA_DIR = path.join(UPLOADS, "channels");
+
+fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
+fs.mkdirSync(CHANNEL_MEDIA_DIR, { recursive: true });
+
+if (!fs.existsSync(CHANNELS_DB)) {
+  fs.writeFileSync(CHANNELS_DB, "[]", "utf8");
+}
 
 fs.mkdirSync(UPLOADS, { recursive: true });
 fs.mkdirSync(DATA, { recursive: true });
@@ -305,6 +432,65 @@ const photoUpload = multer({
       cb(null, true);
     } else {
       cb(new Error("केवल फोटो फ़ाइल upload करें।"));
+    }
+  }
+});
+
+// Channel media upload - existing multer handlers को नहीं छेड़ें।
+const channelMediaStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, CHANNEL_MEDIA_DIR);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    const name =
+      Date.now() +
+      "-" +
+      Math.random().toString(36).slice(2, 10) +
+      ext;
+    cb(null, name);
+  }
+});
+
+const channelMediaUpload = multer({
+  storage: channelMediaStorage,
+  limits: {
+    fileSize: 20 * 1024 * 1024
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("केवल image फ़ाइल upload करें।"));
+    }
+  }
+});
+
+const thumbnailStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, THUMBNAILS_DIR);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    const name =
+      Date.now() +
+      "-" +
+      Math.random().toString(36).slice(2, 10) +
+      ext;
+    cb(null, name);
+  }
+});
+
+const thumbnailUpload = multer({
+  storage: thumbnailStorage,
+  limits: {
+    fileSize: 20 * 1024 * 1024
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("केवल image फ़ाइल thumbnail के लिए चुनें।"));
     }
   }
 });
@@ -1112,6 +1298,1073 @@ function saveVideos(videos) {
   fs.writeFileSync(DB, JSON.stringify(videos, null, 2));
 }
 
+// ============================================================
+// CHANNEL HELPERS
+// ============================================================
+
+function readChannels() {
+  try {
+    const data = JSON.parse(
+      fs.readFileSync(CHANNELS_DB, "utf8")
+    );
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    console.error("CHANNELS DB READ ERROR:", error);
+    return [];
+  }
+}
+
+function saveChannels(channels) {
+  fs.writeFileSync(
+    CHANNELS_DB,
+    JSON.stringify(channels, null, 2),
+    "utf8"
+  );
+}
+
+function getSessionUserId(req) {
+  if (
+    !req.session ||
+    req.session.userAuthenticated !== true ||
+    !req.session.userId
+  ) {
+    return "";
+  }
+
+  return String(req.session.userId).trim();
+}
+
+function normalizeChannelHandle(value) {
+  let handle = String(value || "").trim();
+
+  if (!handle) return "";
+
+  if (!handle.startsWith("@")) {
+    handle = "@" + handle;
+  }
+
+  return handle.toLowerCase();
+}
+
+function isValidChannelHandle(handle) {
+  return /^@[a-z0-9._-]{2,29}$/i.test(handle);
+}
+
+function channelPublicObject(channel) {
+  if (!channel) return null;
+
+  return {
+    id: String(channel.id || ""),
+    userId: String(channel.userId || ""),
+    name: String(channel.name || ""),
+    handle: String(channel.handle || ""),
+    profilePhotoUrl: String(channel.profilePhotoUrl || ""),
+    bannerUrl: String(channel.bannerUrl || ""),
+    description: String(channel.description || ""),
+    links: Array.isArray(channel.links) ? channel.links : [],
+    createdAt: channel.createdAt || "",
+    updatedAt: channel.updatedAt || ""
+  };
+}
+
+
+// ============================================================
+// THUMBNAIL HELPERS
+// ============================================================
+
+function isSafeLocalUploadUrl(url, subfolder) {
+  const value = String(url || "");
+
+  return (
+    value.startsWith("/uploads/" + subfolder + "/") &&
+    !value.includes("..") &&
+    !value.includes("\\")
+  );
+}
+
+function localUploadPathFromUrl(url, subfolder) {
+  if (!isSafeLocalUploadUrl(url, subfolder)) {
+    return null;
+  }
+
+  const relative = valueAfterUploadsSubfolder(
+    String(url),
+    subfolder
+  );
+
+  if (!relative) return null;
+
+  const baseDir =
+    subfolder === "thumbnails"
+      ? THUMBNAILS_DIR
+      : CHANNEL_MEDIA_DIR;
+
+  const fullPath = path.join(
+    baseDir,
+    path.basename(relative)
+  );
+
+  return fullPath;
+}
+
+function valueAfterUploadsSubfolder(url, subfolder) {
+  const prefix = "/uploads/" + subfolder + "/";
+
+  if (!String(url).startsWith(prefix)) {
+    return "";
+  }
+
+  return String(url).slice(prefix.length);
+}
+
+function deleteLocalThumbnailFile(url) {
+  try {
+    const filePath =
+      localUploadPathFromUrl(url, "thumbnails");
+
+    if (
+      filePath &&
+      fs.existsSync(filePath)
+    ) {
+      fs.unlinkSync(filePath);
+    }
+  } catch (error) {
+    console.error(
+      "OLD THUMBNAIL DELETE ERROR:",
+      error.message
+    );
+  }
+}
+
+function runFfmpeg(args) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      "ffmpeg",
+      args,
+      {
+        maxBuffer: 10 * 1024 * 1024
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          error.stdout = stdout;
+          error.stderr = stderr;
+          reject(error);
+          return;
+        }
+
+        resolve({
+          stdout: String(stdout || ""),
+          stderr: String(stderr || "")
+        });
+      }
+    );
+  });
+}
+
+async function extractThumbnailFrame(
+  videoPath,
+  timestamp,
+  outputPath
+) {
+  const safeTime =
+    Number.isFinite(Number(timestamp)) &&
+    Number(timestamp) >= 0
+      ? Number(timestamp)
+      : 0;
+
+  await runFfmpeg([
+    "-y",
+    "-ss",
+    String(safeTime),
+    "-i",
+    videoPath,
+    "-frames:v",
+    "1",
+    "-vf",
+    "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2",
+    "-q:v",
+    "2",
+    outputPath
+  ]);
+
+  if (
+    !fs.existsSync(outputPath) ||
+    fs.statSync(outputPath).size <= 0
+  ) {
+    throw new Error("Thumbnail frame generate नहीं हुआ।");
+  }
+
+  return outputPath;
+}
+
+async function frameBrightness(videoPath, timestamp) {
+  try {
+    const result = await runFfmpeg([
+      "-hide_banner",
+      "-ss",
+      String(Math.max(0, Number(timestamp) || 0)),
+      "-i",
+      videoPath,
+      "-frames:v",
+      "1",
+      "-vf",
+      "scale=320:-2,signalstats,metadata=print:file=-",
+      "-f",
+      "null",
+      "-"
+    ]);
+
+    const text =
+      String(result.stdout || "") +
+      "\n" +
+      String(result.stderr || "");
+
+    const match =
+      text.match(/lavfi\.signalstats\.YAVG[=:]([0-9.]+)/i);
+
+    if (!match) {
+      return null;
+    }
+
+    const value = Number(match[1]);
+
+    return Number.isFinite(value)
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function generateAutomaticThumbnail(
+  videoPath,
+  videoId,
+  duration
+) {
+  const safeDuration =
+    Number.isFinite(Number(duration)) &&
+    Number(duration) > 0
+      ? Number(duration)
+      : 10;
+
+  const percentages = [
+    0.10,
+    0.25,
+    0.40,
+    0.55,
+    0.70,
+    0.85
+  ];
+
+  const candidates = percentages
+    .map(percent =>
+      Math.max(
+        0,
+        Math.min(
+          safeDuration - 0.05,
+          safeDuration * percent
+        )
+      )
+    );
+
+  for (const timestamp of candidates) {
+    const brightness =
+      await frameBrightness(
+        videoPath,
+        timestamp
+      );
+
+    console.log(
+      "THUMBNAIL FRAME CHECK:",
+      timestamp.toFixed(2),
+      "YAVG:",
+      brightness
+    );
+
+    // लगभग black / बहुत dark frame reject करें।
+    if (
+      brightness !== null &&
+      brightness >= 35
+    ) {
+      const filename =
+        String(videoId) +
+        "-auto-" +
+        Date.now() +
+        ".jpg";
+
+      const outputPath =
+        path.join(
+          THUMBNAILS_DIR,
+          filename
+        );
+
+      await extractThumbnailFrame(
+        videoPath,
+        timestamp,
+        outputPath
+      );
+
+      return {
+        url: "/uploads/thumbnails/" + filename,
+        timestamp,
+        source: "auto"
+      };
+    }
+  }
+
+  // अगर सभी frames dark हों तो black frame देने के बजाय
+  // साफ़ light fallback thumbnail बनाएँ।
+  const fallbackName =
+    String(videoId) +
+    "-auto-fallback-" +
+    Date.now() +
+    ".jpg";
+
+  const fallbackPath =
+    path.join(
+      THUMBNAILS_DIR,
+      fallbackName
+    );
+
+  await runFfmpeg([
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    "color=c=lightgray:s=640x360",
+    "-frames:v",
+    "1",
+    "-q:v",
+    "2",
+    fallbackPath
+  ]);
+
+  return {
+    url:
+      "/uploads/thumbnails/" +
+      fallbackName,
+    timestamp: 0,
+    source: "auto-fallback"
+  };
+}
+
+async function normalizeThumbnailImage(
+  inputPath,
+  videoId
+) {
+  const filename =
+    String(videoId) +
+    "-custom-" +
+    Date.now() +
+    "-" +
+    Math.random().toString(36).slice(2, 7) +
+    ".jpg";
+
+  const outputPath =
+    path.join(
+      THUMBNAILS_DIR,
+      filename
+    );
+
+  await runFfmpeg([
+    "-y",
+    "-i",
+    inputPath,
+    "-vf",
+    "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2",
+    "-q:v",
+    "2",
+    outputPath
+  ]);
+
+  if (
+    !fs.existsSync(outputPath) ||
+    fs.statSync(outputPath).size <= 0
+  ) {
+    throw new Error(
+      "Custom thumbnail process नहीं हुआ।"
+    );
+  }
+
+  return {
+    url:
+      "/uploads/thumbnails/" +
+      filename,
+    source: "custom"
+  };
+}
+
+
+
+
+// ============================================================
+// CHANNEL APIs
+// Profile के अंदर से इन्हीं APIs को frontend इस्तेमाल करेगा.
+// ============================================================
+
+app.get("/api/channel/me", (req, res) => {
+  try {
+    const userId = getSessionUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Channel देखने के लिए पहले Login करें।"
+      });
+    }
+
+    const channels = readChannels();
+
+    const channel =
+      channels.find(
+        item =>
+          String(item.userId || "") === userId
+      ) || null;
+
+    res.json({
+      success: true,
+      channel: channelPublicObject(channel)
+    });
+  } catch (error) {
+    console.error("CHANNEL ME ERROR:", error);
+
+    res.status(500).json({
+      success: false,
+      message: "Channel load नहीं हो पाया।"
+    });
+  }
+});
+
+app.post(
+  "/api/channel",
+  channelMediaUpload.fields([
+    { name: "profilePhoto", maxCount: 1 },
+    { name: "banner", maxCount: 1 }
+  ]),
+  (req, res) => {
+    try {
+      const userId = getSessionUserId(req);
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: "Channel बनाने के लिए पहले Login करें।"
+        });
+      }
+
+      const channels = readChannels();
+
+      const existing =
+        channels.find(
+          item =>
+            String(item.userId || "") === userId
+        ) || null;
+
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          message: "आपका Channel पहले से बना हुआ है।"
+        });
+      }
+
+      const name =
+        String(req.body.name || "")
+          .trim()
+          .slice(0, 100);
+
+      const handle =
+        normalizeChannelHandle(
+          req.body.handle
+        );
+
+      const description =
+        String(req.body.description || "")
+          .trim()
+          .slice(0, 1000);
+
+      let links = [];
+
+      try {
+        const rawLinks =
+          String(req.body.links || "").trim();
+
+        if (rawLinks) {
+          links = rawLinks
+            .split(/\r?\n/)
+            .map(item => item.trim())
+            .filter(Boolean)
+            .slice(0, 10);
+        }
+      } catch {}
+
+      if (!name) {
+        return res.status(400).json({
+          success: false,
+          message: "Channel Name जरूरी है।"
+        });
+      }
+
+      if (!handle) {
+        return res.status(400).json({
+          success: false,
+          message: "@Handle जरूरी है।"
+        });
+      }
+
+      if (!isValidChannelHandle(handle)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "@Handle में केवल letters, numbers, dot, underscore और hyphen रखें।"
+        });
+      }
+
+      const duplicate =
+        channels.find(
+          item =>
+            String(item.handle || "")
+              .toLowerCase() ===
+            handle.toLowerCase()
+        );
+
+      if (duplicate) {
+        return res.status(409).json({
+          success: false,
+          message: "यह @Handle पहले से लिया जा चुका है।"
+        });
+      }
+
+      const profilePhoto =
+        req.files &&
+        req.files.profilePhoto &&
+        req.files.profilePhoto[0]
+          ? req.files.profilePhoto[0]
+          : null;
+
+      const banner =
+        req.files &&
+        req.files.banner &&
+        req.files.banner[0]
+          ? req.files.banner[0]
+          : null;
+
+      const now =
+        new Date().toISOString();
+
+      const channel = {
+        id:
+          "channel-" +
+          Date.now().toString(36) +
+          "-" +
+          Math.random()
+            .toString(36)
+            .slice(2, 9),
+
+        userId,
+
+        name,
+
+        handle,
+
+        profilePhotoUrl:
+          profilePhoto
+            ? "/uploads/channels/" +
+              path.basename(profilePhoto.filename)
+            : "",
+
+        bannerUrl:
+          banner
+            ? "/uploads/channels/" +
+              path.basename(banner.filename)
+            : "",
+
+        description,
+
+        links,
+
+        createdAt: now,
+
+        updatedAt: now
+      };
+
+      channels.push(channel);
+
+      saveChannels(channels);
+
+      res.json({
+        success: true,
+        message: "Channel सफलतापूर्वक बन गया।",
+        channel: channelPublicObject(channel)
+      });
+    } catch (error) {
+      console.error(
+        "CHANNEL CREATE ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Channel बनाने में समस्या हुई।"
+      });
+    }
+  }
+);
+
+app.put(
+  "/api/channel",
+  channelMediaUpload.fields([
+    { name: "profilePhoto", maxCount: 1 },
+    { name: "banner", maxCount: 1 }
+  ]),
+  (req, res) => {
+    try {
+      const userId = getSessionUserId(req);
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message:
+            "Channel edit करने के लिए पहले Login करें।"
+        });
+      }
+
+      const channels = readChannels();
+
+      const index =
+        channels.findIndex(
+          item =>
+            String(item.userId || "") ===
+            userId
+        );
+
+      if (index === -1) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Channel पहले बनाइए।"
+        });
+      }
+
+      const channel = channels[index];
+
+      const name =
+        String(
+          req.body.name !== undefined
+            ? req.body.name
+            : channel.name
+        )
+          .trim()
+          .slice(0, 100);
+
+      const handle =
+        normalizeChannelHandle(
+          req.body.handle !== undefined
+            ? req.body.handle
+            : channel.handle
+        );
+
+      const description =
+        String(
+          req.body.description !== undefined
+            ? req.body.description
+            : channel.description || ""
+        )
+          .trim()
+          .slice(0, 1000);
+
+      let links =
+        Array.isArray(channel.links)
+          ? channel.links
+          : [];
+
+      if (req.body.links !== undefined) {
+        const rawLinks =
+          String(req.body.links || "").trim();
+
+        links = rawLinks
+          ? rawLinks
+              .split(/\r?\n/)
+              .map(item => item.trim())
+              .filter(Boolean)
+              .slice(0, 10)
+          : [];
+      }
+
+      if (!name) {
+        return res.status(400).json({
+          success: false,
+          message: "Channel Name जरूरी है।"
+        });
+      }
+
+      if (!handle) {
+        return res.status(400).json({
+          success: false,
+          message: "@Handle जरूरी है।"
+        });
+      }
+
+      if (!isValidChannelHandle(handle)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "@Handle सही format में डालें।"
+        });
+      }
+
+      const duplicate =
+        channels.find(
+          (item, itemIndex) =>
+            itemIndex !== index &&
+            String(item.handle || "")
+              .toLowerCase() ===
+            handle.toLowerCase()
+        );
+
+      if (duplicate) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "यह @Handle पहले से लिया जा चुका है।"
+        });
+      }
+
+      const profilePhoto =
+        req.files &&
+        req.files.profilePhoto &&
+        req.files.profilePhoto[0]
+          ? req.files.profilePhoto[0]
+          : null;
+
+      const banner =
+        req.files &&
+        req.files.banner &&
+        req.files.banner[0]
+          ? req.files.banner[0]
+          : null;
+
+      if (profilePhoto) {
+        channel.profilePhotoUrl =
+          "/uploads/channels/" +
+          path.basename(profilePhoto.filename);
+      }
+
+      if (banner) {
+        channel.bannerUrl =
+          "/uploads/channels/" +
+          path.basename(banner.filename);
+      }
+
+      channel.name = name;
+      channel.handle = handle;
+      channel.description = description;
+      channel.links = links;
+      channel.updatedAt =
+        new Date().toISOString();
+
+      channels[index] = channel;
+
+      saveChannels(channels);
+
+      res.json({
+        success: true,
+        message: "Channel update हो गया।",
+        channel: channelPublicObject(channel)
+      });
+    } catch (error) {
+      console.error(
+        "CHANNEL UPDATE ERROR:",
+        error
+      );
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Channel update में समस्या हुई।"
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// EXISTING VIDEO THUMBNAIL CHANGE API
+// केवल अपने video का thumbnail बदला जा सकता है।
+// Video को दोबारा upload नहीं किया जाता।
+// ============================================================
+
+app.post(
+  "/api/videos/:id/thumbnail",
+  thumbnailUpload.single("thumbnail"),
+  async (req, res) => {
+    let uploadedThumbnailPath = null;
+
+    try {
+      const userId = getSessionUserId(req);
+
+      if (!userId) {
+        if (req.file && req.file.path) {
+          try {
+            fs.unlinkSync(req.file.path);
+          } catch {}
+        }
+
+        return res.status(401).json({
+          success: false,
+          message:
+            "Thumbnail बदलने के लिए पहले Login करें।"
+        });
+      }
+
+      const id =
+        Number(req.params.id);
+
+      if (!Number.isFinite(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid video ID."
+        });
+      }
+
+      const videos = readVideos();
+
+      const index =
+        videos.findIndex(
+          video =>
+            Number(video.id) === id
+        );
+
+      if (index === -1) {
+        return res.status(404).json({
+          success: false,
+          message: "वीडियो नहीं मिला।"
+        });
+      }
+
+      const video = videos[index];
+
+      const ownerUserId =
+        String(
+          video.userId ||
+          video.ownerUserId ||
+          ""
+        ).trim();
+
+      if (
+        !ownerUserId ||
+        ownerUserId !== userId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "आप केवल अपने video का Thumbnail बदल सकते हैं।"
+        });
+      }
+
+      const oldThumbnailUrl =
+        String(
+          video.thumbnailUrl || ""
+        );
+
+      let newThumbnail = null;
+
+      // ------------------------------------------------------
+      // Option 1: Gallery से image
+      // ------------------------------------------------------
+      if (req.file) {
+        uploadedThumbnailPath =
+          req.file.path;
+
+        newThumbnail =
+          await normalizeThumbnailImage(
+            req.file.path,
+            id
+          );
+
+        try {
+          if (
+            fs.existsSync(req.file.path)
+          ) {
+            fs.unlinkSync(req.file.path);
+          }
+        } catch {}
+
+        uploadedThumbnailPath = null;
+      }
+
+      // ------------------------------------------------------
+      // Option 2: Existing video से frame
+      // ------------------------------------------------------
+      else {
+        const timestamp =
+          Number(req.body.timestamp);
+
+        if (
+          !Number.isFinite(timestamp) ||
+          timestamp < 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Gallery image चुनें या video frame का सही timestamp दें।"
+          });
+        }
+
+        // पुराने videos में local MP4 कभी localUrl में
+        // और कभी url में saved है।
+        // दोनों को local upload source के रूप में support करें।
+        const localSourceUrl =
+          String(
+            video.localUrl ||
+            video.url ||
+            ""
+          ).trim();
+
+        if (
+          !localSourceUrl.startsWith("/uploads/")
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "इस video की local file उपलब्ध नहीं है। Gallery से image चुनें।"
+          });
+        }
+
+        const relative =
+          localSourceUrl.slice(
+            "/uploads/".length
+          );
+
+        const localPath =
+          path.join(
+            UPLOADS,
+            path.basename(relative)
+          );
+
+        if (
+          !fs.existsSync(localPath)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "इस video की local file उपलब्ध नहीं है। Gallery से image चुनें।"
+          });
+        }
+
+        const filename =
+          String(id) +
+          "-frame-" +
+          Date.now() +
+          ".jpg";
+
+        const outputPath =
+          path.join(
+            THUMBNAILS_DIR,
+            filename
+          );
+
+        await extractThumbnailFrame(
+          localPath,
+          timestamp,
+          outputPath
+        );
+
+        newThumbnail = {
+          url:
+            "/uploads/thumbnails/" +
+            filename,
+          timestamp,
+          source: "frame"
+        };
+      }
+
+      if (
+        !newThumbnail ||
+        !newThumbnail.url
+      ) {
+        return res.status(500).json({
+          success: false,
+          message:
+            "Thumbnail तैयार नहीं हुआ।"
+        });
+      }
+
+      video.thumbnailUrl =
+        newThumbnail.url;
+
+      video.thumbnailSource =
+        newThumbnail.source;
+
+      if (
+        newThumbnail.timestamp !== undefined
+      ) {
+        video.thumbnailTimestamp =
+          Number(
+            newThumbnail.timestamp
+          );
+      } else {
+        delete video.thumbnailTimestamp;
+      }
+
+      video.thumbnailUpdatedAt =
+        new Date().toISOString();
+
+      videos[index] = video;
+
+      saveVideos(videos);
+
+      // केवल हमारा पुराना local thumbnail हटाएँ।
+      if (
+        oldThumbnailUrl &&
+        oldThumbnailUrl !==
+          newThumbnail.url &&
+        isSafeLocalUploadUrl(
+          oldThumbnailUrl,
+          "thumbnails"
+        )
+      ) {
+        deleteLocalThumbnailFile(
+          oldThumbnailUrl
+        );
+      }
+
+      res.json({
+        success: true,
+        message:
+          "Thumbnail सफलतापूर्वक बदल गया।",
+        thumbnailUrl:
+          newThumbnail.url,
+        thumbnailSource:
+          newThumbnail.source,
+        video
+      });
+    } catch (error) {
+      console.error(
+        "VIDEO THUMBNAIL ERROR:",
+        error
+      );
+
+      if (
+        uploadedThumbnailPath &&
+        fs.existsSync(uploadedThumbnailPath)
+      ) {
+        try {
+          fs.unlinkSync(
+            uploadedThumbnailPath
+          );
+        } catch {}
+      }
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Thumbnail बदलने में समस्या हुई।"
+      });
+    }
+  }
+);
+
 
 /* ==========================================
    VIDEOAPNA CURATED MUSIC LIBRARY
@@ -1657,468 +2910,806 @@ function applyVideoTemplate(inputPath, outputPath, template) {
   });
 }
 
-app.post("/api/upload", upload.single("video"), async (req, res) => {
-  let originalPath = null;
-  let processedPath = null;
-  let soundMergedPath = null;
-
-  try {
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "वीडियो चुनें।"
-      });
+const videoAndThumbnailStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    if (file.fieldname === "thumbnail") {
+      cb(null, THUMBNAILS_DIR);
+    } else {
+      cb(null, UPLOADS);
     }
+  },
 
-    originalPath = req.file.path;
+  filename: (req, file, cb) => {
+    const ext =
+      path.extname(file.originalname || "").toLowerCase() ||
+      (file.fieldname === "thumbnail" ? ".jpg" : ".mp4");
 
-    const title = String(req.body.title || "").trim();
+    const base =
+      path
+        .basename(file.originalname || "upload", ext)
+        .replace(/[^a-zA-Z0-9_-]/g, "-")
+        .slice(0, 80) || "upload";
 
-    if (!title) {
-      fs.unlinkSync(originalPath);
+    cb(
+      null,
+      Date.now() +
+        "-" +
+        Math.random().toString(36).slice(2, 8) +
+        "-" +
+        base +
+        ext
+    );
+  }
+});
 
-      return res.status(400).json({
-        success: false,
-        message: "वीडियो का Title लिखें।"
-      });
-    }
+const videoAndThumbnailUpload = multer({
+  storage: videoAndThumbnailStorage,
+  limits: {
+    fileSize: 500 * 1024 * 1024
+  },
 
-    // केवल logged-in session user ही video upload कर सकता है।
-    const sessionUserAuthenticated =
-      req.session && req.session.userAuthenticated === true;
-
-    const userId =
-      sessionUserAuthenticated
-        ? String(req.session.userId || "").trim()
-        : "";
-
-    if (!sessionUserAuthenticated || !userId) {
-      fs.unlinkSync(originalPath);
-
-      return res.status(401).json({
-        success: false,
-        message:
-          "वीडियो Upload करने के लिए पहले अपने VideoApna Account में Login करें।"
-      });
-    }
-
-    // ------------------------------------------------------------
-    // Video Template
-    // ------------------------------------------------------------
-    const template =
-      String(req.body.template || "normal").trim();
-
-    const allowedTemplates = [
-      "normal",
-      "cinematic",
-      "bright",
-      "vintage",
-      "cool"
-    ];
-
-    const safeTemplate =
-      allowedTemplates.includes(template)
-        ? template
-        : "normal";
-
-    // ------------------------------------------------------------
-    // Selected Music को server-side validate करें।
-    // Client के भेजे soundUrl पर भरोसा नहीं करेंगे।
-    // ------------------------------------------------------------
-    const requestedSoundId =
-      String(req.body.soundId || "").trim();
-
-    const selectedSound =
-      findAllowedSound(requestedSoundId);
-
-    if (requestedSoundId && !selectedSound) {
-      fs.unlinkSync(originalPath);
-
-      return res.status(400).json({
-        success: false,
-        message: "Selected Sound उपलब्ध नहीं है।"
-      });
-    }
-
-    let selectedSoundPath = null;
-
-    if (selectedSound) {
-
-      // Private Sound केवल उसके owner को इस्तेमाल करने दें।
-      if (
-        selectedSound.visibility === "private" &&
-        String(
-          selectedSound.ownerUserId ||
-          selectedSound.userId ||
-          ""
-        ) !== String(userId)
-      ) {
-        fs.unlinkSync(originalPath);
-
-        return res.status(403).json({
-          success: false,
-          message: "यह Private Sound आपके खाते का नहीं है।"
-        });
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname === "video") {
+      if (String(file.mimetype || "").startsWith("video/")) {
+        return cb(null, true);
       }
 
-      selectedSoundPath =
-        resolveSoundFile(selectedSound);
+      return cb(
+        new Error("केवल video file upload करें।")
+      );
+    }
 
-      if (!selectedSoundPath) {
-        fs.unlinkSync(originalPath);
+    if (file.fieldname === "thumbnail") {
+      if (String(file.mimetype || "").startsWith("image/")) {
+        return cb(null, true);
+      }
+
+      return cb(
+        new Error("Thumbnail के लिए केवल image file चुनें।")
+      );
+    }
+
+    return cb(
+      new Error("Invalid upload field.")
+    );
+  }
+});
+
+app.post(
+  "/api/upload",
+  videoAndThumbnailUpload.fields([
+    { name: "video", maxCount: 1 },
+    { name: "thumbnail", maxCount: 1 }
+  ]),
+  async (req, res) => {
+    let originalPath = null;
+    let processedPath = null;
+    let soundMergedPath = null;
+    let customThumbnailTempPath = null;
+    let generatedThumbnailUrl = "";
+    let videoId = Date.now();
+
+    try {
+      const videoFile =
+        req.files &&
+        req.files.video &&
+        req.files.video[0]
+          ? req.files.video[0]
+          : null;
+
+      const thumbnailFile =
+        req.files &&
+        req.files.thumbnail &&
+        req.files.thumbnail[0]
+          ? req.files.thumbnail[0]
+          : null;
+
+      if (!videoFile) {
+        if (thumbnailFile && thumbnailFile.path) {
+          try {
+            fs.unlinkSync(thumbnailFile.path);
+          } catch {}
+        }
 
         return res.status(400).json({
           success: false,
-          message: "Selected Sound file उपलब्ध नहीं है।"
+          message: "वीडियो चुनें।"
         });
       }
-    }
 
-    // ------------------------------------------------------------
-    // Template Apply
-    // ------------------------------------------------------------
-    const ext =
-      path.extname(req.file.filename) || ".mp4";
+      originalPath = videoFile.path;
 
-    const processedFilename =
-      path.basename(req.file.filename, ext) +
-      "-template.mp4";
-
-    processedPath =
-      path.join(UPLOADS, processedFilename);
-
-    console.log(
-      "VIDEO TEMPLATE REQUEST:",
-      safeTemplate
-    );
-
-    await applyVideoTemplate(
-      originalPath,
-      processedPath,
-      safeTemplate
-    );
-
-    // Original temporary upload हटाएँ।
-    if (
-      originalPath !== processedPath &&
-      fs.existsSync(originalPath)
-    ) {
-      fs.unlinkSync(originalPath);
-    }
-
-    originalPath = null;
-
-    // ------------------------------------------------------------
-    // Video duration
-    // ------------------------------------------------------------
-    let videoDuration = 0;
-
-    try {
-      const durationProbe =
-        await new Promise((resolve, reject) => {
-
-          execFile(
-            "ffprobe",
-            [
-              "-v",
-              "error",
-              "-show_entries",
-              "format=duration",
-              "-of",
-              "default=noprint_wrappers=1:nokey=1",
-              processedPath
-            ],
-            (error, stdout, stderr) => {
-
-              if (error) {
-                reject(error);
-                return;
-              }
-
-              const value =
-                Number(
-                  String(stdout || "").trim()
-                );
-
-              if (
-                !Number.isFinite(value) ||
-                value < 0
-              ) {
-                reject(
-                  new Error(
-                    "ffprobe ने valid duration नहीं दी।"
-                  )
-                );
-                return;
-              }
-
-              resolve(value);
-            }
-          );
-        });
-
-      videoDuration = durationProbe;
-
-      console.log(
-        "VIDEO DURATION:",
-        videoDuration.toFixed(2),
-        "seconds"
-      );
-
-    } catch (durationError) {
-
-      console.error(
-        "VIDEO DURATION CHECK FAILED:",
-        durationError.message
-      );
-    }
-
-    // ------------------------------------------------------------
-    // Music को Video में permanently merge करें।
-    // Public Music और user's Private Music दोनों supported हैं।
-    // ------------------------------------------------------------
-    if (selectedSoundPath) {
-
-      soundMergedPath =
-        processedPath.replace(
-          /\.mp4$/i,
-          "-with-sound.mp4"
-        );
-
-      console.log(
-        "ADDING SOUND TO VIDEO:",
-        selectedSound.title
-      );
-
-      await mergeAudioIntoVideo(
-        processedPath,
-        selectedSoundPath,
-        soundMergedPath
-      );
-
-      if (fs.existsSync(processedPath)) {
-        fs.unlinkSync(processedPath);
+      if (thumbnailFile && thumbnailFile.path) {
+        customThumbnailTempPath = thumbnailFile.path;
       }
 
-      fs.renameSync(
-        soundMergedPath,
-        processedPath
-      );
+      const title =
+        String(req.body.title || "").trim();
 
-      soundMergedPath = null;
+      if (!title) {
+        try {
+          fs.unlinkSync(originalPath);
+        } catch {}
 
-      console.log(
-        "SOUND MERGE COMPLETE:",
-        processedPath
-      );
-    }
+        if (customThumbnailTempPath) {
+          try {
+            fs.unlinkSync(customThumbnailTempPath);
+          } catch {}
+          customThumbnailTempPath = null;
+        }
 
-    // ------------------------------------------------------------
-    // VCDN upload — अब Music merge होने के बाद
-    // ------------------------------------------------------------
-    let vcdn = null;
+        return res.status(400).json({
+          success: false,
+          message: "वीडियो का Title लिखें।"
+        });
+      }
 
-    try {
+      // ------------------------------------------------------------
+      // केवल logged-in session user ही video upload कर सकता है।
+      // ------------------------------------------------------------
+      const sessionUserAuthenticated =
+        req.session &&
+        req.session.userAuthenticated === true;
+
+      const userId =
+        sessionUserAuthenticated
+          ? String(req.session.userId || "").trim()
+          : "";
 
       if (
-        String(
-          process.env.VCDN_API_KEY || ""
-        ).trim()
+        !sessionUserAuthenticated ||
+        !userId
       ) {
+        try {
+          fs.unlinkSync(originalPath);
+        } catch {}
 
-        console.log(
-          "VCDN upload starting:",
+        if (customThumbnailTempPath) {
+          try {
+            fs.unlinkSync(customThumbnailTempPath);
+          } catch {}
+          customThumbnailTempPath = null;
+        }
+
+        return res.status(401).json({
+          success: false,
+          message:
+            "वीडियो Upload करने के लिए पहले अपने VideoApna Account में Login करें।"
+        });
+      }
+
+      // ------------------------------------------------------------
+      // Upload के लिए Channel अनिवार्य है।
+      // ------------------------------------------------------------
+      const channels =
+        readChannels();
+
+      const userChannel =
+        channels.find(
+          channel =>
+            String(channel.userId || "").trim() ===
+            String(userId).trim()
+        ) || null;
+
+      if (!userChannel) {
+        try {
+          fs.unlinkSync(originalPath);
+        } catch {}
+
+        if (customThumbnailTempPath) {
+          try {
+            fs.unlinkSync(customThumbnailTempPath);
+          } catch {}
+          customThumbnailTempPath = null;
+        }
+
+        return res.status(403).json({
+          success: false,
+          code: "CHANNEL_REQUIRED",
+          message:
+            "वीडियो Upload करने से पहले Profile में अपना Channel बनाइए।"
+        });
+      }
+
+      // ------------------------------------------------------------
+      // Video Template
+      // ------------------------------------------------------------
+      const template =
+        String(req.body.template || "normal").trim();
+
+      const allowedTemplates = [
+        "normal",
+        "cinematic",
+        "bright",
+        "vintage",
+        "cool"
+      ];
+
+      const safeTemplate =
+        allowedTemplates.includes(template)
+          ? template
+          : "normal";
+
+      // ------------------------------------------------------------
+      // Selected Music को server-side validate करें।
+      // Client के भेजे soundUrl पर भरोसा नहीं करेंगे।
+      // ------------------------------------------------------------
+      const requestedSoundId =
+        String(req.body.soundId || "").trim();
+
+      const selectedSound =
+        findAllowedSound(requestedSoundId);
+
+      if (
+        requestedSoundId &&
+        !selectedSound
+      ) {
+        try {
+          fs.unlinkSync(originalPath);
+        } catch {}
+
+        if (customThumbnailTempPath) {
+          try {
+            fs.unlinkSync(customThumbnailTempPath);
+          } catch {}
+          customThumbnailTempPath = null;
+        }
+
+        return res.status(400).json({
+          success: false,
+          message:
+            "Selected Sound उपलब्ध नहीं है।"
+        });
+      }
+
+      let selectedSoundPath = null;
+
+      if (selectedSound) {
+        // Private Sound केवल उसके owner को इस्तेमाल करने दें।
+        if (
+          selectedSound.visibility === "private" &&
+          String(
+            selectedSound.ownerUserId ||
+            selectedSound.userId ||
+            ""
+          ) !== String(userId)
+        ) {
+          try {
+            fs.unlinkSync(originalPath);
+          } catch {}
+
+          if (customThumbnailTempPath) {
+            try {
+              fs.unlinkSync(customThumbnailTempPath);
+            } catch {}
+            customThumbnailTempPath = null;
+          }
+
+          return res.status(403).json({
+            success: false,
+            message:
+              "यह Private Sound आपके खाते का नहीं है।"
+          });
+        }
+
+        selectedSoundPath =
+          resolveSoundFile(selectedSound);
+
+        if (!selectedSoundPath) {
+          try {
+            fs.unlinkSync(originalPath);
+          } catch {}
+
+          if (customThumbnailTempPath) {
+            try {
+              fs.unlinkSync(customThumbnailTempPath);
+            } catch {}
+            customThumbnailTempPath = null;
+          }
+
+          return res.status(400).json({
+            success: false,
+            message:
+              "Selected Sound file उपलब्ध नहीं है।"
+          });
+        }
+      }
+
+      // ------------------------------------------------------------
+      // Template Apply
+      // ------------------------------------------------------------
+      const ext =
+        path.extname(videoFile.filename) || ".mp4";
+
+      const processedFilename =
+        path.basename(
+          videoFile.filename,
+          ext
+        ) + "-template.mp4";
+
+      processedPath =
+        path.join(
+          UPLOADS,
           processedFilename
         );
 
-        vcdn =
-          await uploadVideoToVcdn(
-            processedPath,
-            title
-          );
-
-        console.log(
-          "VCDN upload ready:",
-          vcdn.vcdnVideoId
-        );
-
-      } else {
-
-        console.log(
-          "VCDN_API_KEY not configured. Using local video."
-        );
-      }
-
-    } catch (vcdnError) {
-
-      console.error(
-        "VCDN upload failed. Keeping local video fallback:",
-        vcdnError.message
+      console.log(
+        "VIDEO TEMPLATE REQUEST:",
+        safeTemplate
       );
 
-      vcdn = null;
-    }
+      await applyVideoTemplate(
+        originalPath,
+        processedPath,
+        safeTemplate
+      );
 
-    const localVideoUrl =
-      "/uploads/" + processedFilename;
-
-    // ------------------------------------------------------------
-    // Final Video object
-    // Sound metadata केवल server-side selectedSound से आएगा।
-    // ------------------------------------------------------------
-    const video = {
-
-      id: Date.now(),
-
-      userId,
-      ownerUserId: userId,
-      visibility: "public",
-
-      // यह /api/upload वाला सामान्य Long Video है।
-      contentType: "long",
-
-      title,
-
-      description:
-        String(
-          req.body.description || ""
-        ),
-
-      category:
-        String(
-          req.body.category || "मनोरंजन"
-        ),
-
-      template: safeTemplate,
-
-      channel: "VideoApna",
-
-      views: "0 views",
-
-      duration:
-        Number(videoDuration || 0),
-
-      url:
-        vcdn &&
-        vcdn.vcdnPlaybackUrl
-          ? vcdn.vcdnPlaybackUrl
-          : localVideoUrl,
-
-      localUrl:
-        localVideoUrl,
-
-      fileName:
-        req.file.originalname,
-
-      vcdnVideoId:
-        vcdn
-          ? vcdn.vcdnVideoId
-          : "",
-
-      vcdnStatus:
-        vcdn
-          ? vcdn.vcdnStatus
-          : "local",
-
-      vcdnPlaybackUrl:
-        vcdn
-          ? vcdn.vcdnPlaybackUrl
-          : "",
-
-      embedUrl:
-        vcdn
-          ? vcdn.vcdnEmbedUrl
-          : "",
-
-      posterUrl:
-        vcdn
-          ? vcdn.vcdnPosterUrl
-          : "",
-
-      soundId:
-        selectedSound
-          ? String(selectedSound.id)
-          : "",
-
-      soundTitle:
-        selectedSound
-          ? String(
-              selectedSound.title || ""
-            )
-          : "",
-
-      soundUrl:
-        selectedSound
-          ? String(
-              selectedSound.url || ""
-            )
-          : "",
-
-      createdAt:
-        new Date().toISOString()
-    };
-
-    const videos = readVideos();
-
-    videos.unshift(video);
-
-    saveVideos(videos);
-
-    res.json({
-      success: true,
-
-      message:
-        vcdn
-          ? "वीडियो Music के साथ VCDN पर Publish हो गया!"
-          : "वीडियो Music के साथ Publish हो गया!",
-
-      video
-    });
-
-  } catch (error) {
-
-    console.error(
-      "VIDEO UPLOAD/TEMPLATE/SOUND ERROR:",
-      error
-    );
-
-    // Failed processing में temporary files साफ करें।
-    try {
+      // Original temporary upload हटाएँ।
       if (
-        soundMergedPath &&
-        fs.existsSync(soundMergedPath)
-      ) {
-        fs.unlinkSync(soundMergedPath);
-      }
-    } catch {}
-
-    try {
-      if (
-        processedPath &&
-        fs.existsSync(processedPath)
-      ) {
-        fs.unlinkSync(processedPath);
-      }
-    } catch {}
-
-    try {
-      if (
-        originalPath &&
+        originalPath !== processedPath &&
         fs.existsSync(originalPath)
       ) {
         fs.unlinkSync(originalPath);
       }
-    } catch {}
 
-    res.status(500).json({
-      success: false,
+      originalPath = null;
 
-      message:
-        error.message ||
-        "वीडियो Publish नहीं हो पाया।"
-    });
+      // ------------------------------------------------------------
+      // Video duration
+      // ------------------------------------------------------------
+      let videoDuration = 0;
+
+      try {
+        const durationProbe =
+          await new Promise(
+            (resolve, reject) => {
+              execFile(
+                "ffprobe",
+                [
+                  "-v",
+                  "error",
+                  "-show_entries",
+                  "format=duration",
+                  "-of",
+                  "default=noprint_wrappers=1:nokey=1",
+                  processedPath
+                ],
+                (error, stdout, stderr) => {
+                  if (error) {
+                    reject(error);
+                    return;
+                  }
+
+                  const value =
+                    Number(
+                      String(stdout || "").trim()
+                    );
+
+                  if (
+                    !Number.isFinite(value) ||
+                    value < 0
+                  ) {
+                    reject(
+                      new Error(
+                        "ffprobe ने valid duration नहीं दी।"
+                      )
+                    );
+                    return;
+                  }
+
+                  resolve(value);
+                }
+              );
+            }
+          );
+
+        videoDuration = durationProbe;
+
+        console.log(
+          "VIDEO DURATION:",
+          videoDuration.toFixed(2),
+          "seconds"
+        );
+      } catch (durationError) {
+        console.error(
+          "VIDEO DURATION CHECK FAILED:",
+          durationError.message
+        );
+      }
+
+      // ------------------------------------------------------------
+      // Music को Video में permanently merge करें।
+      // ------------------------------------------------------------
+      if (selectedSoundPath) {
+        soundMergedPath =
+          processedPath.replace(
+            /\.mp4$/i,
+            "-with-sound.mp4"
+          );
+
+        console.log(
+          "ADDING SOUND TO VIDEO:",
+          selectedSound.title
+        );
+
+        await mergeAudioIntoVideo(
+          processedPath,
+          selectedSoundPath,
+          soundMergedPath
+        );
+
+        if (
+          fs.existsSync(processedPath)
+        ) {
+          fs.unlinkSync(processedPath);
+        }
+
+        fs.renameSync(
+          soundMergedPath,
+          processedPath
+        );
+
+        soundMergedPath = null;
+
+        console.log(
+          "SOUND MERGE COMPLETE:",
+          processedPath
+        );
+      }
+
+      // ------------------------------------------------------------
+      // Thumbnail
+      // Custom image हो तो वही।
+      // नहीं तो processed final video से automatic thumbnail।
+      // ------------------------------------------------------------
+      let thumbnailUrl = "";
+      let thumbnailSource = "auto";
+      let thumbnailTimestamp = null;
+
+      if (customThumbnailTempPath) {
+        const normalizedThumbnail =
+          await normalizeThumbnailImage(
+            customThumbnailTempPath,
+            videoId
+          );
+
+        thumbnailUrl =
+          normalizedThumbnail.url;
+
+        thumbnailSource = "custom";
+
+        try {
+          if (
+            fs.existsSync(
+              customThumbnailTempPath
+            )
+          ) {
+            fs.unlinkSync(
+              customThumbnailTempPath
+            );
+          }
+        } catch {}
+
+        customThumbnailTempPath = null;
+      } else {
+        const automaticThumbnail =
+          await generateAutomaticThumbnail(
+            processedPath,
+            videoId,
+            videoDuration
+          );
+
+        thumbnailUrl =
+          automaticThumbnail.url;
+
+        thumbnailSource = "auto";
+
+        if (
+          automaticThumbnail.timestamp !==
+          undefined
+        ) {
+          thumbnailTimestamp =
+            Number(
+              automaticThumbnail.timestamp
+            );
+        }
+      }
+
+      generatedThumbnailUrl =
+        thumbnailUrl;
+
+      console.log(
+        "VIDEO THUMBNAIL:",
+        thumbnailUrl,
+        thumbnailSource,
+        thumbnailTimestamp
+      );
+
+      // ------------------------------------------------------------
+      // VCDN upload — Music merge + Thumbnail generation के बाद।
+      // Existing VCDN behavior preserved.
+      // ------------------------------------------------------------
+      let vcdn = null;
+
+      try {
+        if (
+          String(
+            process.env.VCDN_API_KEY || ""
+          ).trim()
+        ) {
+          console.log(
+            "VCDN upload starting:",
+            processedFilename
+          );
+
+          vcdn =
+            await uploadVideoToVcdn(
+              processedPath,
+              title
+            );
+
+          console.log(
+            "VCDN upload ready:",
+            vcdn.vcdnVideoId
+          );
+        } else {
+          console.log(
+            "VCDN_API_KEY not configured. Using local video."
+          );
+        }
+      } catch (vcdnError) {
+        console.error(
+          "VCDN upload failed. Keeping local video fallback:",
+          vcdnError.message
+        );
+
+        vcdn = null;
+      }
+
+      const localVideoUrl =
+        "/uploads/" +
+        processedFilename;
+
+      // ------------------------------------------------------------
+      // Final Video object
+      // ------------------------------------------------------------
+      const video = {
+        id: videoId,
+
+        userId,
+        ownerUserId: userId,
+
+        visibility: "public",
+
+        // Upload की वास्तविक duration के आधार पर automatic classification।
+        // 90 सेकंड तक = Short, 90 सेकंड से ज्यादा = Long।
+        // Duration probe fail होने पर 0 रहेगा, इसलिए सुरक्षित रूप से Long।
+        contentType:
+          Number(videoDuration) > 0 &&
+          Number(videoDuration) <= 90
+            ? "short"
+            : "long",
+
+        title,
+
+        description:
+          String(
+            req.body.description || ""
+          ),
+
+        category:
+          String(
+            req.body.category ||
+            "मनोरंजन"
+          ),
+
+        template: safeTemplate,
+
+        // --------------------------------------------------------
+        // Channel information
+        // --------------------------------------------------------
+        channelId:
+          String(
+            userChannel.id || ""
+          ),
+
+        channelName:
+          String(
+            userChannel.name || ""
+          ),
+
+        channelHandle:
+          String(
+            userChannel.handle || ""
+          ),
+
+        channel:
+          String(
+            userChannel.name ||
+            "VideoApna"
+          ),
+
+        views: "0 views",
+
+        duration:
+          Number(
+            videoDuration || 0
+          ),
+
+        // --------------------------------------------------------
+        // Thumbnail
+        // --------------------------------------------------------
+        thumbnailUrl,
+
+        thumbnailSource,
+
+        ...(thumbnailTimestamp !== null
+          ? {
+              thumbnailTimestamp
+            }
+          : {}),
+
+        thumbnailUpdatedAt:
+          new Date().toISOString(),
+
+        url:
+          vcdn &&
+          vcdn.vcdnPlaybackUrl
+            ? vcdn.vcdnPlaybackUrl
+            : localVideoUrl,
+
+        localUrl:
+          localVideoUrl,
+
+        fileName:
+          videoFile.originalname,
+
+        vcdnVideoId:
+          vcdn
+            ? vcdn.vcdnVideoId
+            : "",
+
+        vcdnStatus:
+          vcdn
+            ? vcdn.vcdnStatus
+            : "local",
+
+        vcdnPlaybackUrl:
+          vcdn
+            ? vcdn.vcdnPlaybackUrl
+            : "",
+
+        embedUrl:
+          vcdn
+            ? vcdn.vcdnEmbedUrl
+            : "",
+
+        posterUrl:
+          vcdn
+            ? vcdn.vcdnPosterUrl
+            : "",
+
+        soundId:
+          selectedSound
+            ? String(
+                selectedSound.id
+              )
+            : "",
+
+        soundTitle:
+          selectedSound
+            ? String(
+                selectedSound.title || ""
+              )
+            : "",
+
+        soundUrl:
+          selectedSound
+            ? String(
+                selectedSound.url || ""
+              )
+            : "",
+
+        createdAt:
+          new Date().toISOString()
+      };
+
+      const videos =
+        readVideos();
+
+      videos.unshift(video);
+
+      saveVideos(videos);
+
+      res.json({
+        success: true,
+
+        message:
+          vcdn
+            ? "वीडियो Music के साथ VCDN पर Publish हो गया!"
+            : "वीडियो Music के साथ Publish हो गया!",
+
+        video
+      });
+
+    } catch (error) {
+      console.error(
+        "VIDEO UPLOAD/TEMPLATE/SOUND/THUMBNAIL ERROR:",
+        error
+      );
+
+      // Failed processing में temporary files साफ करें।
+      try {
+        if (
+          soundMergedPath &&
+          fs.existsSync(soundMergedPath)
+        ) {
+          fs.unlinkSync(
+            soundMergedPath
+          );
+        }
+      } catch {}
+
+      try {
+        if (
+          processedPath &&
+          fs.existsSync(processedPath)
+        ) {
+          fs.unlinkSync(
+            processedPath
+          );
+        }
+      } catch {}
+
+      try {
+        if (
+          originalPath &&
+          fs.existsSync(originalPath)
+        ) {
+          fs.unlinkSync(
+            originalPath
+          );
+        }
+      } catch {}
+
+      try {
+        if (
+          customThumbnailTempPath &&
+          fs.existsSync(
+            customThumbnailTempPath
+          )
+        ) {
+          fs.unlinkSync(
+            customThumbnailTempPath
+          );
+        }
+      } catch {}
+
+      // अगर thumbnail बन चुका था लेकिन video save नहीं हुआ,
+      // तो generated thumbnail भी साफ करें।
+      try {
+        if (
+          generatedThumbnailUrl &&
+          isSafeLocalUploadUrl(
+            generatedThumbnailUrl,
+            "thumbnails"
+          )
+        ) {
+          deleteLocalThumbnailFile(
+            generatedThumbnailUrl
+          );
+        }
+      } catch {}
+
+      res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "वीडियो Publish नहीं हो पाया।"
+      });
+    }
   }
-});
+);
 
 /* ================================
    VIDEOAPNA VIEWS API
@@ -3257,6 +4848,134 @@ app.delete("/api/videos/:id", (req, res) => {
     res.status(500).json({
       success: false,
       message: "वीडियो Delete नहीं हो पाया।"
+    });
+  }
+});
+
+
+
+// ============================================================
+// VIDEO EDIT API
+// केवल अपने video का Title / Description / Category बदला जा सकता है.
+// Ownership हमेशा logged-in session से verify होगी.
+// ============================================================
+
+app.patch("/api/videos/:id", (req, res) => {
+  try {
+    const userId = getSessionUserId(req);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "वीडियो Edit करने के लिए पहले Login करें।"
+      });
+    }
+
+    const id = Number(req.params.id);
+
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid video ID."
+      });
+    }
+
+    const videos = readVideos();
+
+    const index = videos.findIndex(
+      video => Number(video.id) === id
+    );
+
+    if (index === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "वीडियो नहीं मिला।"
+      });
+    }
+
+    const video = videos[index];
+
+    const ownerUserId = String(
+      video.userId ||
+      video.ownerUserId ||
+      ""
+    ).trim();
+
+    if (!ownerUserId || ownerUserId !== userId) {
+      return res.status(403).json({
+        success: false,
+        message: "आप केवल अपना video Edit कर सकते हैं।"
+      });
+    }
+
+    const allowedCategories = [
+      "मनोरंजन",
+      "संगीत",
+      "शिक्षा",
+      "न्यूज़",
+      "खेल"
+    ];
+
+    // केवल भेजे गए fields बदलेंगे।
+    // बाकी video fields बिल्कुल वैसे ही रहेंगे।
+
+    if (req.body.title !== undefined) {
+      const title = String(req.body.title || "")
+        .trim()
+        .slice(0, 200);
+
+      if (!title) {
+        return res.status(400).json({
+          success: false,
+          message: "Video Title खाली नहीं हो सकता।"
+        });
+      }
+
+      video.title = title;
+    }
+
+    if (req.body.description !== undefined) {
+      video.description = String(
+        req.body.description || ""
+      )
+        .trim()
+        .slice(0, 5000);
+    }
+
+    if (req.body.category !== undefined) {
+      const category = String(
+        req.body.category || ""
+      ).trim();
+
+      if (!allowedCategories.includes(category)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid video category."
+        });
+      }
+
+      video.category = category;
+    }
+
+    videos[index] = video;
+
+    saveVideos(videos);
+
+    return res.json({
+      success: true,
+      message: "वीडियो Update हो गया!",
+      video: video
+    });
+
+  } catch (error) {
+    console.error(
+      "VIDEO EDIT ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "वीडियो Update नहीं हो पाया।"
     });
   }
 });
@@ -5466,7 +7185,7 @@ app.get("/api/youtube-search", (req, res) => {
           // अब केवल embeddable videos चेक करें
           const statusUrl =
             "https://www.googleapis.com/youtube/v3/videos" +
-            "?part=status" +
+            "?part=status,contentDetails" +
             "&id=" + encodeURIComponent(ids.join(",")) +
             "&key=" + encodeURIComponent(key);
 
@@ -5504,22 +7223,44 @@ app.get("/api/youtube-search", (req, res) => {
                     .map(item => item.id)
                 );
 
+                const statusItems = statusJson.items || [];
+
+                const statusById = new Map(
+                  statusItems.map(item => [
+                    String(item.id),
+                    item
+                  ])
+                );
+
                 const videos = items
                   .filter(item =>
                     item.id &&
                     item.id.videoId &&
                     embeddableIds.has(item.id.videoId)
                   )
-                  .map(item => ({
-                    videoId: item.id.videoId,
-                    title: item.snippet.title,
-                    description: item.snippet.description,
-                    channelTitle: item.snippet.channelTitle,
-                    thumbnail:
-                      item.snippet.thumbnails?.high?.url ||
-                      item.snippet.thumbnails?.medium?.url ||
-                      item.snippet.thumbnails?.default?.url
-                  }));
+                  .map(item => {
+                    const videoId = String(item.id.videoId);
+                    const statusItem = statusById.get(videoId);
+                    const duration =
+                      statusItem &&
+                      statusItem.contentDetails
+                        ? String(
+                            statusItem.contentDetails.duration || ""
+                          )
+                        : "";
+
+                    return {
+                      videoId,
+                      title: item.snippet.title,
+                      description: item.snippet.description,
+                      channelTitle: item.snippet.channelTitle,
+                      thumbnail:
+                        item.snippet.thumbnails?.high?.url ||
+                        item.snippet.thumbnails?.medium?.url ||
+                        item.snippet.thumbnails?.default?.url,
+                      duration
+                    };
+                  });
 
                 console.log(
                   "YOUTUBE SEARCH:",
@@ -5597,6 +7338,1189 @@ app.get("/api/youtube-search", (req, res) => {
 
 
 // ============================================================
+
+
+// ============================================================
+// RESTORED YOUTUBE LONG VIDEO BACKEND
+// ============================================================
+
+// ============================================================
+// YOUTUBE LONG VIDEO SEARCH
+// केवल वही videos लौटेंगे जो:
+// 1. YouTube में embeddable हों
+// 2. Duration 90 seconds से ज्यादा हो
+// 3. अगली page के लिए pagination token उपलब्ध हो
+// ============================================================
+
+
+// ============================================================
+// YOUTUBE LONG SERVER CACHE
+// केवल YouTube metadata/results cache होंगे।
+// Actual video file cache नहीं होगी.
+// ============================================================
+
+const YOUTUBE_LONG_CACHE_FILE =
+  path.join(
+    __dirname,
+    "data",
+    "youtube-long-cache.json"
+  );
+
+const YOUTUBE_LONG_CACHE_TTL_MS =
+  24 * 60 * 60 * 1000;
+
+let youtubeLongServerCache = {};
+
+// ============================================================
+// YOUTUBE LONG AUTO FAILED CACHE
+// केवल वे YouTube IDs रखी जाएँगी जिन्हें VideoApna player ने
+// वास्तविक embedding/player error के रूप में report किया है.
+// ============================================================
+
+const YOUTUBE_LONG_FAILED_FILE =
+  path.join(
+    __dirname,
+    "data",
+    "youtube-long-failed.json"
+  );
+
+let youtubeLongFailedCache = {};
+
+try {
+  if (fs.existsSync(YOUTUBE_LONG_FAILED_FILE)) {
+    const failedText =
+      fs.readFileSync(
+        YOUTUBE_LONG_FAILED_FILE,
+        "utf8"
+      );
+
+    const parsedFailed =
+      JSON.parse(failedText);
+
+    if (
+      parsedFailed &&
+      typeof parsedFailed === "object" &&
+      !Array.isArray(parsedFailed)
+    ) {
+      youtubeLongFailedCache = parsedFailed;
+    }
+  }
+} catch (error) {
+  console.warn(
+    "⚠️ YouTube Long failed cache load failed:",
+    error.message
+  );
+
+  youtubeLongFailedCache = {};
+}
+
+function isYouTubeLongAutoFailed(videoId) {
+  const id =
+    String(videoId || "").trim();
+
+  if (!id) {
+    return false;
+  }
+
+  return Boolean(
+    youtubeLongFailedCache[id]
+  );
+}
+
+function saveYouTubeLongAutoFailed(
+  videoId,
+  errorCode
+) {
+  const id =
+    String(videoId || "").trim();
+
+  if (!id) {
+    return false;
+  }
+
+  youtubeLongFailedCache[id] = {
+    failedAt: Date.now(),
+    errorCode: Number(errorCode || 0)
+  };
+
+  try {
+    fs.mkdirSync(
+      path.dirname(
+        YOUTUBE_LONG_FAILED_FILE
+      ),
+      {
+        recursive: true
+      }
+    );
+
+    fs.writeFileSync(
+      YOUTUBE_LONG_FAILED_FILE,
+      JSON.stringify(
+        youtubeLongFailedCache,
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    console.log(
+      "🚫 YouTube Long auto-failed saved:",
+      id,
+      "code:",
+      Number(errorCode || 0)
+    );
+
+    return true;
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long failed cache save failed:",
+      error.message
+    );
+
+    return false;
+  }
+}
+
+try {
+  if (
+    fs.existsSync(
+      YOUTUBE_LONG_CACHE_FILE
+    )
+  ) {
+    const cacheText =
+      fs.readFileSync(
+        YOUTUBE_LONG_CACHE_FILE,
+        "utf8"
+      );
+
+    const parsed =
+      JSON.parse(cacheText);
+
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed)
+    ) {
+      youtubeLongServerCache = parsed;
+    }
+  }
+} catch (error) {
+  console.warn(
+    "⚠️ YouTube Long cache load failed:",
+    error.message
+  );
+
+  youtubeLongServerCache = {};
+}
+
+function getYouTubeLongCacheKey(
+  query,
+  pageToken
+) {
+  return JSON.stringify({
+    version: "manual-filter-v1",
+
+    q:
+      String(query || "")
+        .trim()
+        .toLowerCase(),
+
+    pageToken:
+      String(pageToken || "")
+        .trim()
+  });
+}
+
+
+
+// ============================================================
+// YOUTUBE LONG PER-VIDEO PLAYABILITY CACHE
+// एक सफल real-embed verification को अलग-अलग Long searches में
+// दोबारा Puppeteer से check करने की जरूरत नहीं होगी.
+// ============================================================
+const YOUTUBE_LONG_PLAYABILITY_CACHE_FILE =
+  path.join(
+    __dirname,
+    "data",
+    "youtube-long-playability-cache.json"
+  );
+
+const YOUTUBE_LONG_PLAYABILITY_CACHE_TTL_MS =
+  24 * 60 * 60 * 1000;
+
+let youtubeLongPlayabilityCache = {};
+
+try {
+  if (
+    fs.existsSync(
+      YOUTUBE_LONG_PLAYABILITY_CACHE_FILE
+    )
+  ) {
+    const cacheText =
+      fs.readFileSync(
+        YOUTUBE_LONG_PLAYABILITY_CACHE_FILE,
+        "utf8"
+      );
+
+    const parsedCache =
+      JSON.parse(cacheText);
+
+    if (
+      parsedCache &&
+      typeof parsedCache === "object" &&
+      !Array.isArray(parsedCache)
+    ) {
+      youtubeLongPlayabilityCache =
+        parsedCache;
+    }
+  }
+} catch (error) {
+  console.warn(
+    "⚠️ YouTube Long playability cache load failed:",
+    error.message
+  );
+
+  youtubeLongPlayabilityCache = {};
+}
+
+function getYouTubeLongPlayabilityCached(
+  videoId
+) {
+  const id =
+    String(videoId || "").trim();
+
+  if (!id) {
+    return null;
+  }
+
+  const entry =
+    youtubeLongPlayabilityCache[id];
+
+  if (
+    !entry ||
+    entry.playable !== true ||
+    !entry.checkedAt
+  ) {
+    return null;
+  }
+
+  const age =
+    Date.now() -
+    Date.parse(entry.checkedAt);
+
+  if (
+    !Number.isFinite(age) ||
+    age < 0 ||
+    age > YOUTUBE_LONG_PLAYABILITY_CACHE_TTL_MS
+  ) {
+    delete youtubeLongPlayabilityCache[id];
+    return null;
+  }
+
+  return entry;
+}
+
+function saveYouTubeLongPlayabilityCached(
+  videoId,
+  check
+) {
+  const id =
+    String(videoId || "").trim();
+
+  if (
+    !id ||
+    !check ||
+    check.playable !== true
+  ) {
+    return;
+  }
+
+  youtubeLongPlayabilityCache[id] = {
+    playable: true,
+    reason:
+      String(check.reason || ""),
+    checkedAt:
+      new Date().toISOString()
+  };
+
+  try {
+    fs.mkdirSync(
+      path.dirname(
+        YOUTUBE_LONG_PLAYABILITY_CACHE_FILE
+      ),
+      { recursive: true }
+    );
+
+    fs.writeFileSync(
+      YOUTUBE_LONG_PLAYABILITY_CACHE_FILE,
+      JSON.stringify(
+        youtubeLongPlayabilityCache,
+        null,
+        2
+      ),
+      "utf8"
+    );
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long playability cache save failed:",
+      error.message
+    );
+  }
+}
+
+const VIDEOAPNA_PUPPETEER_CHECKER_URL =
+  String(
+    process.env.VIDEOAPNA_PUPPETEER_CHECKER_URL ||
+    "https://videoapna-puppeteer-test.onrender.com"
+  ).replace(/\/+$/, "");
+
+async function checkYouTubeLongWithPuppeteer(videoId) {
+  const id = String(videoId || "").trim();
+
+  if (!id) {
+    return {
+      playable: false,
+      reason: "missing videoId"
+    };
+  }
+
+  const url =
+    VIDEOAPNA_PUPPETEER_CHECKER_URL +
+    "/check?videoId=" +
+    encodeURIComponent(id);
+
+  try {
+    const response =
+      await fetch(url, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json"
+        }
+      });
+
+    if (!response.ok) {
+      return {
+        playable: false,
+        reason: "checker HTTP " + response.status
+      };
+    }
+
+    const result =
+      await response.json();
+
+    return {
+      playable:
+        result &&
+        result.playable === true,
+
+      reason:
+        String(
+          result?.reason || ""
+        ),
+
+      text:
+        String(
+          result?.text || ""
+        )
+    };
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Puppeteer checker request failed:",
+      id,
+      error.message
+    );
+
+    return {
+      playable: false,
+      reason: "checker request failed"
+    };
+  }
+}
+
+const YOUTUBE_LONG_BLOCKED_IDS = new Set([
+  "kgBvRi0Dc2o"
+]);
+
+function isBlockedYouTubeLongVideo(videoId) {
+  return YOUTUBE_LONG_BLOCKED_IDS.has(
+    String(videoId || "").trim()
+  );
+}
+
+function isValidCachedYouTubeLongVideo(video) {
+  if (!video || typeof video !== "object") {
+    return false;
+  }
+
+  const videoId =
+    String(video.videoId || "").trim();
+
+  if (!videoId) {
+    return false;
+  }
+
+  if (isBlockedYouTubeLongVideo(videoId)) {
+    return false;
+  }
+
+  if (isYouTubeLongAutoFailed(videoId)) {
+    return false;
+  }
+
+  if (
+    String(video.source || "").toLowerCase() !==
+    "youtube"
+  ) {
+    return false;
+  }
+
+  const embedUrl =
+    String(video.embedUrl || "").trim();
+
+  if (!embedUrl) {
+    return false;
+  }
+
+  /*
+   * Cached YouTube Long videos में server ने
+   * पहले से verified duration रखा है।
+   */
+  const durationText =
+    String(video.duration || "");
+
+  const match =
+    durationText.match(
+      /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/
+    );
+
+  if (!match) {
+    return false;
+  }
+
+  const hours =
+    Number(match[1] || 0);
+
+  const minutes =
+    Number(match[2] || 0);
+
+  const seconds =
+    Number(match[3] || 0);
+
+  const totalSeconds =
+    (hours * 3600) +
+    (minutes * 60) +
+    seconds;
+
+  if (
+    !Number.isFinite(totalSeconds) ||
+    totalSeconds <= 90
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+// ============================================================
+// YOUTUBE LONG IN-FLIGHT REQUEST LOCK
+// Same query + pageToken पर concurrent requests को एक ही
+// Puppeteer/API job का result reuse कराया जाएगा.
+// ============================================================
+
+const youtubeLongInFlight = new Map();
+
+function getYouTubeLongInFlightKey(query, pageToken) {
+  return (
+    String(query || "").trim().toLowerCase() +
+    "|" +
+    String(pageToken || "").trim()
+  );
+}
+
+function getYouTubeLongCachedResult(
+  query,
+  pageToken
+) {
+  const key =
+    getYouTubeLongCacheKey(
+      query,
+      pageToken
+    );
+
+  const entry =
+    youtubeLongServerCache[key];
+
+  if (
+    !entry ||
+    !entry.savedAt ||
+    !Array.isArray(entry.videos)
+  ) {
+    return null;
+  }
+
+  const age =
+    Date.now() -
+    Number(entry.savedAt);
+
+  if (
+    !Number.isFinite(age) ||
+    age < 0 ||
+    age > YOUTUBE_LONG_CACHE_TTL_MS
+  ) {
+    delete youtubeLongServerCache[key];
+    return null;
+  }
+
+  return {
+    nextPageToken:
+      String(
+        entry.nextPageToken || ""
+      ),
+
+    videos:
+      entry.videos.filter(
+        isValidCachedYouTubeLongVideo
+      )
+  };
+}
+
+function saveYouTubeLongCachedResult(
+  query,
+  pageToken,
+  nextPageToken,
+  videos
+) {
+  const key =
+    getYouTubeLongCacheKey(
+      query,
+      pageToken
+    );
+
+  youtubeLongServerCache[key] = {
+    savedAt:
+      Date.now(),
+
+    nextPageToken:
+      String(
+        nextPageToken || ""
+      ),
+
+    videos:
+      Array.isArray(videos)
+        ? videos.slice()
+        : []
+  };
+
+  try {
+    fs.mkdirSync(
+      path.dirname(
+        YOUTUBE_LONG_CACHE_FILE
+      ),
+      {
+        recursive: true
+      }
+    );
+
+    fs.writeFileSync(
+      YOUTUBE_LONG_CACHE_FILE,
+      JSON.stringify(
+        youtubeLongServerCache,
+        null,
+        2
+      ),
+      "utf8"
+    );
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long cache save failed:",
+      error.message
+    );
+  }
+}
+
+app.get("/api/youtube-long-search", (req, res) => {
+  try {
+    const query = String(req.query.q || "").trim();
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        message: "Search शब्द डालें।"
+      });
+    }
+
+    const key = process.env.YOUTUBE_API_KEY;
+
+    if (!key) {
+      return res.status(500).json({
+        success: false,
+        message: "YouTube API key configured नहीं है।"
+      });
+    }
+
+    const https = require("https");
+
+    const pageToken = String(
+      req.query.pageToken || ""
+    ).trim();
+
+    // ==========================================================
+    // SERVER CACHE FIRST
+    // Same query + same pageToken होने पर
+    // YouTube API को दोबारा call नहीं करेंगे।
+    // ==========================================================
+
+    const cachedYouTubeLong =
+      getYouTubeLongCachedResult(
+        query,
+        pageToken
+      );
+
+    if (cachedYouTubeLong) {
+
+      console.log(
+        "✅ YOUTUBE LONG CACHE HIT:",
+        query,
+        "| page:",
+        pageToken
+          ? "NEXT"
+          : "FIRST",
+        "| videos:",
+        cachedYouTubeLong.videos.length
+      );
+
+      return res.json({
+        success: true,
+
+        nextPageToken:
+          cachedYouTubeLong.nextPageToken,
+
+        videos:
+          cachedYouTubeLong.videos
+      });
+    }
+
+    // ==========================================================
+    // IN-FLIGHT LOCK
+    // Same query + pageToken की दूसरी concurrent request
+    // Puppeteer/API job दोबारा शुरू नहीं करेगी।
+    // ==========================================================
+
+    const inFlightKey =
+      getYouTubeLongInFlightKey(
+        query,
+        pageToken
+      );
+
+    const existingInFlight =
+      youtubeLongInFlight.get(
+        inFlightKey
+      );
+
+    if (existingInFlight) {
+
+      console.log(
+        "⏳ YOUTUBE LONG IN-FLIGHT WAIT:",
+        query,
+        "| page:",
+        pageToken
+          ? "NEXT"
+          : "FIRST"
+      );
+
+      existingInFlight.then(() => {
+
+        const completedCache =
+          getYouTubeLongCachedResult(
+            query,
+            pageToken
+          );
+
+        if (completedCache) {
+
+          console.log(
+            "✅ YOUTUBE LONG IN-FLIGHT CACHE READY:",
+            query,
+            "| page:",
+            pageToken
+              ? "NEXT"
+              : "FIRST",
+            "| videos:",
+            completedCache.videos.length
+          );
+
+          return res.json({
+            success: true,
+            nextPageToken:
+              completedCache.nextPageToken,
+            videos:
+              completedCache.videos
+          });
+        }
+
+        return res.status(502).json({
+          success: false,
+          message:
+            "YouTube Long request पूरा हुआ लेकिन cache result उपलब्ध नहीं है।"
+        });
+
+      }).catch(error => {
+
+        console.error(
+          "❌ YOUTUBE LONG IN-FLIGHT WAIT ERROR:",
+          error.message
+        );
+
+        if (!res.headersSent) {
+          res.status(502).json({
+            success: false,
+            message:
+              "YouTube Long request में समस्या हुई।"
+          });
+        }
+
+      });
+
+      return;
+    }
+
+    let resolveInFlight;
+
+    const inFlightPromise =
+      new Promise(resolve => {
+        resolveInFlight = resolve;
+      });
+
+    youtubeLongInFlight.set(
+      inFlightKey,
+      inFlightPromise
+    );
+
+    res.once("finish", () => {
+
+      resolveInFlight();
+
+      youtubeLongInFlight.delete(
+        inFlightKey
+      );
+
+    });
+
+    res.once("close", () => {
+
+      if (
+        youtubeLongInFlight.get(
+          inFlightKey
+        ) === inFlightPromise
+      ) {
+        resolveInFlight();
+
+        youtubeLongInFlight.delete(
+          inFlightKey
+        );
+      }
+
+    });
+
+    console.log(
+      "🌐 YOUTUBE LONG CACHE MISS:",
+      query,
+      "| page:",
+      pageToken
+        ? "NEXT"
+        : "FIRST"
+    );
+
+
+    const searchUrl =
+      "https://www.googleapis.com/youtube/v3/search" +
+      "?part=snippet" +
+      "&q=" + encodeURIComponent(query) +
+      "&type=video" +
+      "&videoEmbeddable=true" +
+      "&videoSyndicated=true" +
+      "&maxResults=50" +
+      (
+        pageToken
+          ? "&pageToken=" + encodeURIComponent(pageToken)
+          : ""
+      ) +
+      "&key=" + encodeURIComponent(key);
+
+    https.get(searchUrl, searchRes => {
+      let data = "";
+
+      searchRes.on("data", chunk => {
+        data += chunk;
+      });
+
+      searchRes.on("end", () => {
+        try {
+          const json = JSON.parse(data);
+
+          if (json.error) {
+            console.error(
+              "YOUTUBE LONG SEARCH API ERROR:",
+              json.error
+            );
+
+            return res.status(502).json({
+              success: false,
+              message:
+                json.error.message ||
+                "YouTube API error"
+            });
+          }
+
+          const items = Array.isArray(json.items)
+            ? json.items
+            : [];
+
+          if (!items.length) {
+            return res.json({
+              success: true,
+              nextPageToken: "",
+              videos: []
+            });
+          }
+
+          const ids = items
+            .map(item =>
+              item.id &&
+              item.id.videoId
+            )
+            .filter(Boolean);
+
+          if (!ids.length) {
+            return res.json({
+              success: true,
+              nextPageToken:
+                json.nextPageToken || "",
+              videos: []
+            });
+          }
+
+          const detailsUrl =
+            "https://www.googleapis.com/youtube/v3/videos" +
+            "?part=status,contentDetails" +
+            "&id=" +
+            encodeURIComponent(ids.join(",")) +
+            "&key=" +
+            encodeURIComponent(key);
+
+          https.get(detailsUrl, detailsRes => {
+            let detailsData = "";
+
+            detailsRes.on("data", chunk => {
+              detailsData += chunk;
+            });
+
+            detailsRes.on("end", async () => {
+              try {
+                const detailsJson =
+                  JSON.parse(detailsData);
+
+                if (detailsJson.error) {
+                  console.error(
+                    "YOUTUBE LONG DETAILS API ERROR:",
+                    detailsJson.error
+                  );
+
+                  return res.status(502).json({
+                    success: false,
+                    message:
+                      detailsJson.error.message ||
+                      "YouTube video details error"
+                  });
+                }
+
+                const detailsMap = new Map();
+
+                for (const item of detailsJson.items || []) {
+                  detailsMap.set(item.id, item);
+                }
+
+                const candidateItems = items
+                  .filter(item => {
+                    const videoId =
+                      item.id &&
+                      item.id.videoId;
+
+                    if (!videoId) {
+                      return false;
+                    }
+
+                    if (isBlockedYouTubeLongVideo(videoId)) {
+                      return false;
+                    }
+
+                    // FILTER 2: VideoApna player ने पहले इस
+                    // YouTube video को वास्तविक player error
+                    // के रूप में report किया हो तो दोबारा न दिखाएँ।
+                    if (isYouTubeLongAutoFailed(videoId)) {
+                      return false;
+                    }
+
+                    const details =
+                      detailsMap.get(videoId);
+
+                    if (!details) {
+                      return false;
+                    }
+
+                    // FILTER 1: YouTube में embedding allowed
+                    if (
+                      !details.status ||
+                      details.status.embeddable !== true
+                    ) {
+                      return false;
+                    }
+
+                    // FILTER 2: YouTube processing पूरा हो चुका हो
+                    if (
+                      details.status.uploadStatus !== "processed"
+                    ) {
+                      return false;
+                    }
+
+                    // FILTER 3: केवल public YouTube videos
+                    if (
+                      details.status.privacyStatus &&
+                      details.status.privacyStatus !== "public"
+                    ) {
+                      return false;
+                    }
+
+                    // FILTER 4: duration > 90 seconds
+                    const duration = String(
+                      details.contentDetails?.duration || ""
+                    );
+
+                    const match = duration.match(
+                      /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/
+                    );
+
+                    if (!match) {
+                      return false;
+                    }
+
+                    const hours =
+                      Number(match[1] || 0);
+
+                    const minutes =
+                      Number(match[2] || 0);
+
+                    const seconds =
+                      Number(match[3] || 0);
+
+                    const totalSeconds =
+                      (hours * 3600) +
+                      (minutes * 60) +
+                      seconds;
+
+                    return totalSeconds > 90;
+                  });
+
+                /*
+                 * MANUAL LONG VIDEO FILTER
+                 *
+                 * YouTube API के official metadata filters
+                 * पास करने वाले Long videos सीधे feed में जाएँगे।
+                 *
+                 * Puppeteer / external checker यहाँ इस्तेमाल नहीं होगा।
+                 * Actual embedded-player errors को client-side Long
+                 * player बाद में Shorts की तरह handle करेगा।
+                 */
+
+const videos = candidateItems.map(item => {
+                    const videoId =
+                      item.id.videoId;
+
+                    const details =
+                      detailsMap.get(videoId);
+
+                    return {
+                      videoId,
+                      title:
+                        item.snippet.title,
+                      description:
+                        item.snippet.description,
+                      channelTitle:
+                        item.snippet.channelTitle,
+                      thumbnail:
+                        item.snippet.thumbnails?.high?.url ||
+                        item.snippet.thumbnails?.medium?.url ||
+                        item.snippet.thumbnails?.default?.url,
+                      duration:
+                        String(
+                          details.contentDetails?.duration || ""
+                        ),
+                      embedUrl:
+                        "https://www.youtube.com/embed/" +
+                        encodeURIComponent(videoId),
+                      source: "youtube",
+                      sourceName: "YouTube"
+                    };
+                  });
+
+                console.log(
+                  "YOUTUBE LONG SEARCH:",
+                  query,
+                  "| Found:",
+                  items.length,
+                  "| Valid Long:",
+                  videos.length
+                );
+
+                // ==================================================
+                // SAVE FILTERED RESULTS TO SERVER CACHE
+                // केवल valid Long videos cache होंगे।
+                // ==================================================
+
+                saveYouTubeLongCachedResult(
+                  query,
+                  pageToken,
+                  json.nextPageToken || "",
+                  videos
+                );
+
+                console.log(
+                  "💾 YOUTUBE LONG CACHE SAVED:",
+                  query,
+                  "| page:",
+                  pageToken
+                    ? "NEXT"
+                    : "FIRST",
+                  "| videos:",
+                  videos.length
+                );
+
+                return res.json({
+                  success: true,
+                  nextPageToken:
+                    json.nextPageToken || "",
+                  videos
+                });
+
+              } catch (error) {
+                console.error(
+                  "YOUTUBE LONG DETAILS RESPONSE ERROR:",
+                  error
+                );
+
+                return res.status(502).json({
+                  success: false,
+                  message:
+                    "YouTube long-video details response समझ नहीं आया।"
+                });
+              }
+            });
+          }).on("error", error => {
+            console.error(
+              "YOUTUBE LONG DETAILS NETWORK ERROR:",
+              error
+            );
+
+            return res.status(502).json({
+              success: false,
+              message:
+                "YouTube long-video details request failed।"
+            });
+          });
+
+        } catch (error) {
+          console.error(
+            "YOUTUBE LONG SEARCH RESPONSE ERROR:",
+            error
+          );
+
+          return res.status(502).json({
+            success: false,
+            message:
+              "YouTube long-video response समझ नहीं आया।"
+          });
+        }
+      });
+    }).on("error", error => {
+      console.error(
+        "YOUTUBE LONG SEARCH NETWORK ERROR:",
+        error
+      );
+
+      return res.status(502).json({
+        success: false,
+        message:
+          "YouTube long-video search request failed।"
+      });
+    });
+
+  } catch (error) {
+    console.error(
+      "YOUTUBE LONG SEARCH SERVER ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "YouTube long-video search में server error आया।"
+    });
+  }
+});
+
+// ============================================================
+// RESTORED YOUTUBE LONG PLAYER FAILURE REPORT
+// ============================================================
+
+app.post("/api/youtube-long-player-failed", (req, res) => {
+  try {
+    const videoId =
+      String(req.body && req.body.videoId || "").trim();
+
+    const errorCode =
+      Number(req.body && req.body.errorCode || 0);
+
+    const allowedCodes = new Set([100, 101, 150]);
+
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid YouTube video ID"
+      });
+    }
+
+    if (!allowedCodes.has(errorCode)) {
+      return res.status(400).json({
+        success: false,
+        message: "Unsupported YouTube player error"
+      });
+    }
+
+    const saved =
+      saveYouTubeLongAutoFailed(
+        videoId,
+        errorCode
+      );
+
+    return res.json({
+      success: Boolean(saved),
+      videoId,
+      errorCode
+    });
+
+  } catch (error) {
+    console.warn(
+      "⚠️ YouTube Long player report failed:",
+      error.message
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "YouTube player report save failed"
+    });
+  }
+});
+
 // VIDEOAPNA SHORT MUSIC REMIX
 // केवल VideoApna Shorts के लिए
 // Long Video इस endpoint में स्वीकार नहीं होगा।
