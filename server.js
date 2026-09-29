@@ -378,15 +378,14 @@ const CHANNELS_DB = path.join(DATA, "channels.json");
 const THUMBNAILS_DIR = path.join(UPLOADS, "thumbnails");
 const CHANNEL_MEDIA_DIR = path.join(UPLOADS, "channels");
 
+fs.mkdirSync(DATA, { recursive: true });
+fs.mkdirSync(UPLOADS, { recursive: true });
 fs.mkdirSync(THUMBNAILS_DIR, { recursive: true });
 fs.mkdirSync(CHANNEL_MEDIA_DIR, { recursive: true });
 
 if (!fs.existsSync(CHANNELS_DB)) {
   fs.writeFileSync(CHANNELS_DB, "[]", "utf8");
 }
-
-fs.mkdirSync(UPLOADS, { recursive: true });
-fs.mkdirSync(DATA, { recursive: true });
 
 if (!fs.existsSync(DB)) {
   fs.writeFileSync(DB, "[]");
